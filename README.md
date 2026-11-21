@@ -243,7 +243,7 @@ X-Api-Key: your-secret-key-here
 
 The `/health` endpoint is always unauthenticated. It returns server CPU/memory/disk usage, database connectivity status, MQTT reachability (based on last node heartbeat), and online/total node counts — used by the KESTREL Server Health panel.
 
-If you are running KESTREL from the same origin (via Nginx reverse proxy), add the key to the Shield's build environment so it is included in API calls:
+If you are running KESTREL from the same origin (via Nginx reverse proxy), add the key to the dashboard's build environment so it is included in API calls:
 
 ```env
 # kestrel-dashboard/.env.production
