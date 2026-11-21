@@ -66,9 +66,10 @@ const css = `
 }
 .cmd-units:hover { border-color: var(--steel-blue); }
 .cmd-clock { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; flex-shrink: 0; }
-.cmd-clock .z { font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--text-bright); letter-spacing: .02em; }
-.cmd-clock .z b { color: var(--olive); font-weight: 600; }
-.cmd-clock .l { font-family: var(--cond); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-muted); }
+.cmd-clock .big { font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--text-bright); letter-spacing: .02em; }
+.cmd-clock .big b { color: var(--olive); font-weight: 600; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; margin-left: 5px; }
+.cmd-clock .small { font-family: var(--mono); font-size: 10px; letter-spacing: .04em; color: var(--text-muted); margin-top: 1px; }
+.cmd-clock .small b { color: var(--olive); font-weight: 600; }
 @keyframes cmd-beat { 0%,100% { opacity: .4 } 50% { opacity: 1 } }
 @media (prefers-reduced-motion: reduce) { .chip.danger .dot, .cmd-link .d { animation: none } }
 @media (max-width: 1180px) { .cmd-sub, .cmd-link { display: none } .cmd { gap: 12px } }
@@ -105,7 +106,7 @@ export default function Topbar() {
 
   const p = n => n.toString().padStart(2, '0')
   const z = `${p(now.getUTCHours())}:${p(now.getUTCMinutes())}:${p(now.getUTCSeconds())}`
-  const local = `${p(now.getHours())}:${p(now.getMinutes())}`
+  const local = `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`
 
   const nodeTone = totalNodes === 0 ? 'danger' : onlineNodes === totalNodes ? 'ok' : onlineNodes > 0 ? 'warn' : 'danger'
 
@@ -148,8 +149,8 @@ export default function Topbar() {
         <div className="cmd-sep" />
 
         <div className="cmd-clock">
-          <span className="z">{z}<b>Z</b></span>
-          <span className="l">{local} Local</span>
+          <span className="big">{local}<b>Local</b></span>
+          <span className="small">{z}<b>Z</b></span>
         </div>
       </header>
     </>

@@ -1,6 +1,6 @@
 # KESTREL
 
-> Multi-node Remote ID detection, threat scoring, and MLAT position estimation
+> Open-source airspace awareness platform. Distributed KESTREL nodes (KN-xx) passively detect FAA Remote ID broadcasts over Wi-Fi NAN and Bluetooth 5 LR, feeding a central server that correlates detections across nodes, identifies drone make and model from FAA Declaration of Compliance records, scores threats, and verifies positions via MLAT trilateration.
 >
 > _Formerly AEGIS (platform) and ARGUS (nodes). The full rename to KESTREL — directories, services, MQTT topics, env vars, and node callsigns (KN-xx) — is complete; see `docs/kestrel-migration.md` for the fleet cutover steps._
 
