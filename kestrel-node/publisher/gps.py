@@ -202,6 +202,31 @@ def save_survey_state(
             pass
 
 
+# ── NMEA altitude ──────────────────────────────────────────────────────────
+
+def gga_alt_hae(msg) -> tuple[Optional[float], bool]:
+    """
+    Altitude from a GGA sentence as (metres, is_hae).
+
+    GGA altitude is above mean sea level; adding the geoid separation field
+    gives height above the WGS-84 ellipsoid (HAE), the reference UBX-NAV-PVT
+    uses. Without a separation value only MSL is available (is_hae False).
+    """
+    try:
+        msl = float(msg.altitude) if msg.altitude not in (None, "") else None
+    except (TypeError, ValueError):
+        msl = None
+    if msl is None:
+        return None, False
+    try:
+        sep = float(msg.geo_sep) if msg.geo_sep not in (None, "") else None
+    except (TypeError, ValueError, AttributeError):
+        sep = None
+    if sep is None:
+        return msl, False
+    return msl + sep, True
+
+
 # ── NMEA validation ────────────────────────────────────────────────────────
 
 def is_valid_nmea(line: str) -> bool:
@@ -392,6 +417,9 @@ class GPSDaemon:
         self._jamming_state:  Optional[str]  = None
         self._spoofing_state: Optional[str]  = None
         self._survey_complete: bool          = False
+        # Set once UBX-NAV-PVT arrives; from then on it is the altitude
+        # authority and NMEA only fills in when it can also give HAE.
+        self._pvt_seen:       bool           = False
 
     # ── Thread-safe properties ─────────────────────────────────────────────
 
@@ -650,9 +678,10 @@ class GPSDaemon:
         with self._lock:
             self._satellites = num_sv
             if fix_type >= 3:
+                self._pvt_seen = True
                 self._lat = lat
                 self._lon = lon
-                self._alt = alt
+                self._alt = alt     # height above ellipsoid (HAE)
                 if not self._has_fix:
                     log.info(
                         f"GPS fix acquired (UBX): {lat:.6f}, {lon:.6f}, "
@@ -717,7 +746,13 @@ class GPSDaemon:
                 if msg.gps_qual and int(msg.gps_qual) > 0:
                     self._lat       = float(msg.latitude)  if msg.latitude  else 0.0
                     self._lon       = float(msg.longitude) if msg.longitude else 0.0
-                    self._alt       = float(msg.altitude)  if msg.altitude  else 0.0
+                    alt, is_hae = gga_alt_hae(msg)
+                    # Node altitude is always HAE (matches UBX-NAV-PVT, survey-in,
+                    # Remote ID geodetic and ADS-B geometric altitude). A GGA
+                    # with no geoid separation can only give MSL (~27 m off in
+                    # Nebraska), so it's used only when no UBX source exists.
+                    if alt is not None and (is_hae or not self._pvt_seen):
+                        self._alt = alt
                     self._satellites = int(msg.num_sats)    if msg.num_sats  else 0
                     if not self._has_fix:
                         log.info(

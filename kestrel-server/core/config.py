@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     alert_low_aircraft_agl_ft: float = 400.0   # Crewed aircraft below this AGL near a node -> deconfliction advisory
     alert_low_aircraft_radius_km: float = 8.0  # Only alert on aircraft within this range of a node
     alert_low_aircraft_cooldown_s: float = 120.0  # Re-alert interval for a loitering low aircraft
+    node_offline_after_s: int = 300            # No heartbeat this long -> offline (min 5 min; nodes beat every ~10 s)
+    alert_node_offline_enabled: bool = True    # Raise an alert (and push) when a node goes offline
 
     # RF contacts (SDR-classified links)
     rf_correlation_window_s: int = 20          # RID track must be this fresh to correlate

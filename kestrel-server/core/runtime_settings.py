@@ -44,6 +44,10 @@ EDITABLE: dict[str, dict] = {
     "live_window_s":           {"type": "int",   "group": "Live map", "label": "Remove after (s)"},
     # Remote ID make/model reference (FAA Declaration of Compliance source)
     "rid_doc_source_url":      {"type": "str",   "group": "Remote ID", "label": "FAA DoC source URL"},
+    # Node health — live-editable
+    "alert_node_offline_enabled": {"type": "bool", "group": "Nodes", "label": "Alert when a node goes offline"},
+    "node_offline_after_s":    {"type": "int",   "group": "Nodes", "label": "Mark offline after no heartbeat (s, min 300)",
+                                "min": 300, "max": 86400},
     # Low-aircraft deconfliction advisory (ADS-B) — live-editable
     "alert_low_aircraft_agl_ft":     {"type": "float", "group": "Airspace (ADS-B)", "label": "Alert below (ft AGL)",
                                       "min": 50, "max": 5000},

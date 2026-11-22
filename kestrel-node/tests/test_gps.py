@@ -677,3 +677,67 @@ class TestNodeConfigDefaults:
         from config.settings import NodeConfig
         cfg = NodeConfig()
         assert cfg.gps_baud == 38400
+
+
+# ── Node altitude is always HAE (no MSL/HAE flip between sources) ───────────
+
+import struct as _struct
+from functools import reduce as _reduce
+from publisher.gps import GPSDaemon, gga_alt_hae
+
+
+def _gga(alt_msl="345.0", geo_sep="-27.1", qual="1"):
+    body = f"GPGGA,123519,4132.400,N,09607.800,W,{qual},08,0.9,{alt_msl},M,{geo_sep},M,,"
+    cs = _reduce(lambda a, c: a ^ ord(c), body, 0)
+    return f"${body}*{cs:02X}"
+
+
+def _nav_pvt(alt_hae_m, fix_type=3):
+    p = bytearray(92)
+    p[20] = fix_type
+    p[23] = 12
+    _struct.pack_into("<i", p, 24, int(-96.13 * 1e7))
+    _struct.pack_into("<i", p, 28, int(41.54 * 1e7))
+    _struct.pack_into("<i", p, 32, int(round(alt_hae_m * 1000)))
+    return bytes(p)
+
+
+def _daemon(tmp_path):
+    return GPSDaemon(port="/dev/null", survey_state_path=tmp_path / "survey.json")
+
+
+class TestNodeAltitudeHAE:
+    def test_gga_alt_converted_to_hae(self):
+        import pynmea2
+        alt, is_hae = gga_alt_hae(pynmea2.parse(_gga("345.0", "-27.1")))
+        assert is_hae and alt == pytest.approx(317.9)
+
+    def test_gga_without_geo_sep_is_msl(self):
+        import pynmea2
+        alt, is_hae = gga_alt_hae(pynmea2.parse(_gga("345.0", "")))
+        assert not is_hae and alt == pytest.approx(345.0)
+
+    def test_gga_alone_gives_hae(self, tmp_path):
+        d = _daemon(tmp_path)
+        d._parse_nmea(_gga("345.0", "-27.1"))
+        assert d.alt == pytest.approx(317.9)
+
+    def test_pvt_and_gga_agree_no_flip(self, tmp_path):
+        # The bug: PVT (HAE) and GGA (MSL) alternated each second, ~27 m apart.
+        d = _daemon(tmp_path)
+        readings = []
+        for _ in range(3):
+            d._parse_nav_pvt(_nav_pvt(317.9));  readings.append(d.alt)
+            d._parse_nmea(_gga("345.0", "-27.1")); readings.append(d.alt)
+        assert max(readings) - min(readings) < 0.05
+
+    def test_msl_only_gga_ignored_once_pvt_running(self, tmp_path):
+        d = _daemon(tmp_path)
+        d._parse_nav_pvt(_nav_pvt(317.9))
+        d._parse_nmea(_gga("345.0", ""))         # no separation -> MSL only
+        assert d.alt == pytest.approx(317.9)     # stays HAE
+
+    def test_msl_only_gga_used_when_no_ubx(self, tmp_path):
+        d = _daemon(tmp_path)                    # non-u-blox receiver: best available
+        d._parse_nmea(_gga("345.0", ""))
+        assert d.alt == pytest.approx(345.0)

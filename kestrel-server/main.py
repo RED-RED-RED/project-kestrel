@@ -76,10 +76,15 @@ async def lifespan(app: FastAPI):
     health_task = asyncio.create_task(
         run_sampler(settings.server_health_interval_s), name="server-health")
 
+    # Mark nodes offline when heartbeats stop and no LWT arrives
+    from core.node_watchdog import run_watchdog
+    watchdog_task = asyncio.create_task(
+        run_watchdog(mqtt.alert_engine, mqtt.broadcaster), name="node-watchdog")
+
     yield  # Server is running
 
     log.info("Shutting down…")
-    for task in (mqtt_task, health_task):
+    for task in (mqtt_task, health_task, watchdog_task):
         task.cancel()
         try:
             await task

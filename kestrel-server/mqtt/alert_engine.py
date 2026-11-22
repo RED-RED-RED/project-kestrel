@@ -357,13 +357,19 @@ class AlertEngine:
                 "ref_id": f"aircraft:{icao}",
             })
 
-    async def node_offline(self, node_id: str):
-        """Called by the status handler when a node goes offline."""
+    async def node_offline(self, node_id: str, detail: str | None = None):
+        """A node went offline: LWT from the status handler, or a heartbeat
+        timeout from core/node_watchdog.py (which passes its own detail).
+        Switchable in Settings -> Nodes; when off the node still shows offline
+        on the map, it just doesn't raise an alert or a push."""
+        if not self._live("alert_node_offline_enabled", True):
+            return
         await self._emit({
             "level": "medium",
             "category": "node_offline",
             "title": f"Sensor node offline — {node_id}",
-            "description": f"Node {node_id} stopped sending heartbeats. Coverage gap may exist.",
+            "description": (detail or f"Node {node_id} disconnected from the broker.")
+                           + " Coverage gap may exist.",
             "drone_id": None,
             "node_id": node_id,
             "lat": None,
