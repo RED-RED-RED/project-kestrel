@@ -43,6 +43,20 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
     return 2 * 6371.0 * asin(sqrt(a))
 
 
+def _compass(lat1, lon1, lat2, lon2) -> str:
+    """Rough cardinal direction (N/NE/.../NW) from point 1 toward point 2."""
+    from math import radians, degrees, sin, cos, atan2
+    dlon = radians(lon2 - lon1)
+    y = sin(dlon) * cos(radians(lat2))
+    x = (cos(radians(lat1)) * sin(radians(lat2))
+         - sin(radians(lat1)) * cos(radians(lat2)) * cos(dlon))
+    brg = (degrees(atan2(y, x)) + 360) % 360
+    return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][round(brg / 45) % 8]
+
+
+_FT_PER_M = 3.28084
+
+
 class AlertEngine:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -271,6 +285,66 @@ class AlertEngine:
                     "lat": event.node_position.lat,
                     "lon": event.node_position.lon,
                 })
+
+    async def evaluate_aircraft(self, node_id: str, node_lat: float, node_lon: float,
+                                node_alt_m: float, aircraft: list[dict]):
+        """
+        Deconfliction advisory: a crewed aircraft flying low (under the AGL
+        threshold, default 400 ft) and near a node shares the drone operating
+        band. Aircraft are otherwise informational and never threat-scored.
+
+        AGL is estimated as the aircraft's altitude minus the node's ground
+        elevation. That only holds for aircraft close to the node (similar
+        terrain), which is exactly what the proximity gate enforces. Geometric
+        altitude is preferred over barometric since it shares the node's GNSS
+        reference.
+        """
+        self._cleanup_dedup()
+        s = self.settings
+        thr_ft = getattr(s, "alert_low_aircraft_agl_ft", 400.0)
+        radius_km = getattr(s, "alert_low_aircraft_radius_km", 8.0)
+        cooldown = getattr(s, "alert_low_aircraft_cooldown_s", 120.0)
+        node_alt_ft = (node_alt_m or 0.0) * _FT_PER_M
+        now_ts = time.time()
+
+        for ac in aircraft:
+            if ac.get("on_ground"):
+                continue
+            alt_ft = ac.get("alt_geom")
+            if alt_ft is None:
+                alt_ft = ac.get("alt_baro")
+            if alt_ft is None or ac.get("lat") is None or ac.get("lon") is None:
+                continue
+            agl_ft = alt_ft - node_alt_ft
+            if agl_ft >= thr_ft:
+                continue
+            dist_km = _haversine_km(node_lat, node_lon, ac["lat"], ac["lon"])
+            if dist_km > radius_km:
+                continue
+
+            icao = ac.get("icao")
+            key = ("low_aircraft", icao, node_id)
+            if now_ts - self._dedup[key] < cooldown:
+                continue
+            self._dedup[key] = now_ts
+
+            label = ac.get("callsign") or icao or "unknown aircraft"
+            brg = _compass(node_lat, node_lon, ac["lat"], ac["lon"])
+            await self._emit({
+                "level": "medium",
+                "category": "low_aircraft",
+                "title": f"Low aircraft near {node_id} — {label}",
+                "description": (
+                    f"Crewed aircraft {label} at ~{agl_ft:.0f} ft AGL, "
+                    f"{dist_km:.1f} km {brg} of {node_id}. In the drone operating "
+                    f"band — deconflict before flying."
+                ),
+                "drone_id": None,
+                "node_id": node_id,
+                "lat": ac["lat"],
+                "lon": ac["lon"],
+                "ref_id": f"aircraft:{icao}",
+            })
 
     async def node_offline(self, node_id: str):
         """Called by the status handler when a node goes offline."""

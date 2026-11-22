@@ -19,6 +19,32 @@ class NodePosition(BaseModel):
     alt: float = 0.0
 
 
+class Aircraft(BaseModel):
+    """One crewed aircraft from ADS-B (dump1090 via the node)."""
+    icao: Optional[str] = None
+    callsign: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    alt_baro: Optional[float] = None       # ft, pressure
+    alt_geom: Optional[float] = None       # ft, geometric (GNSS) — preferred for AGL
+    gs: Optional[float] = None             # kt
+    track: Optional[float] = None          # deg
+    squawk: Optional[str] = None
+    vert_rate: Optional[float] = None      # ft/min
+    on_ground: bool = False
+    seen: Optional[float] = None           # s since last message
+    rssi: Optional[float] = None
+
+
+class AircraftReport(BaseModel):
+    """kestrel/<node>/aircraft — the node's current ADS-B picture (per poll)."""
+    node_id: str
+    node_position: NodePosition
+    aircraft: list[Aircraft] = []
+    count: int = 0
+    ts: float
+
+
 class NodeHeartbeat(BaseModel):
     """Parsed from MQTT kestrel/<node_id>/heartbeat"""
     node_id: str

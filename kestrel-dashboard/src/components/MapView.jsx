@@ -1,10 +1,15 @@
 // src/components/MapView.jsx
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { useStore, selectActiveDrones, selectAllNodes, selectRfContacts, isStale,
-         RF_SIGNAL_LABELS, RF_BAND_LABELS, useUnits, fmtAlt, fmtSpeed, fmtDist } from '../store/useStore'
+import { useStore, selectActiveDrones, selectAllNodes, selectRfContacts, selectAircraft, isStale,
+         RF_SIGNAL_LABELS, RF_BAND_LABELS, useUnits, fmtAlt, fmtSpeed, fmtDist,
+         fmtAltFt, fmtSpeedKt } from '../store/useStore'
 import { colors } from '../theme/colors'
+
+// Crewed aircraft (ADS-B) read as quiet traffic, not threats — a muted sky tone,
+// deliberately distinct from the round drone markers and diamond RF markers.
+const AC_COLOR = '#9FB4C4'
 
 // ── RF contact marker (SDR-classified link; no exact position) ──────────────
 function rfColor(c) {
@@ -55,6 +60,60 @@ function rfPopupHtml(c, imperial) {
       <div style="margin-top:3px;">${corr}</div>
       <div style="margin-top:3px;color:${colors.textMuted}">seen by ${(c.detecting_nodes||[]).join(', ')}</div>
       <div style="color:${colors.textMuted};font-size:8px;margin-top:2px;">ring = RSSI range estimate, not a position fix</div>
+    </div>`
+}
+
+// ── Crewed-aircraft (ADS-B) marker ──────────────────────────────────────────
+// A top-down airliner silhouette, rotated by ground track. Muted sky tone
+// normally; a low aircraft (one with an open deconfliction advisory) flips to
+// red, pulses, and tags "⚠" — the one place this layer is allowed to be loud.
+function aircraftIcon(ac, low = false) {
+  const color = low ? colors.threatHigh : AC_COLOR
+  const rot   = ac.track ?? 0
+  const label = ac.callsign || ac.icao || ''
+  const animKey = 'ac_' + String(ac.icao || 'x').replace(/\W/g, '_')
+  const pulse = low ? `@keyframes ${animKey}{0%,100%{opacity:1}50%{opacity:.4}}` : ''
+  const tag = label ? `<div style="
+      position:absolute;top:-13px;left:50%;transform:translateX(-50%);
+      font-family:var(--mono);font-size:8px;font-weight:bold;white-space:nowrap;
+      color:${color};background:rgba(14,19,18,0.92);padding:0 3px;border-radius:2px;
+      border:1px solid ${color};">${label}${low ? ' ⚠' : ''}</div>` : ''
+  const html = `<style>${pulse}</style>
+    <div style="position:relative;width:20px;height:20px;display:flex;align-items:center;justify-content:center;">
+      ${tag}
+      <div style="transform:rotate(${rot}deg);display:flex;${low ? `animation:${animKey} 1.1s infinite;` : ''}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="${color}" style="filter:drop-shadow(0 0 3px ${color});">
+          <path d="M12 2c.6 0 1 .9 1 2.2V9l8 4.6v1.7L13 13v4.3l2.2 1.4v1.3L12 19l-3.2 1.3v-1.3L11 17.3V13l-8 2.3v-1.7L11 9V4.2C11 2.9 11.4 2 12 2z"/>
+        </svg>
+      </div>
+    </div>`
+  return L.divIcon({ html, className:'', iconSize:[20,20], iconAnchor:[10,10], popupAnchor:[0,-12] })
+}
+
+function aircraftPopupHtml(ac, imperial = false, low = false) {
+  const color = low ? colors.threatHigh : AC_COLOR
+  const label = ac.callsign || ac.icao || 'aircraft'
+  const alt   = ac.alt_geom ?? ac.alt_baro
+  const altSrc = ac.alt_geom != null ? ' (geo)' : ac.alt_baro != null ? ' (baro)' : ''
+  const vs    = ac.vert_rate
+  const vstxt = vs == null ? '—'
+    : `${vs > 50 ? '▲ ' : vs < -50 ? '▼ ' : ''}${Math.abs(Math.round(vs))} fpm`
+  const lowline = low
+    ? `<div style="margin-top:4px;color:${colors.threatHigh};">⚠ In the drone operating band — deconflict before flying</div>`
+    : ''
+  return `
+    <div style="font-family:var(--mono);font-size:10px;line-height:1.7;min-width:190px;">
+      <div style="font-family:var(--cond);font-weight:700;font-size:13px;color:${color};
+        margin-bottom:4px;text-transform:uppercase;">${label}
+        <span style="color:var(--text-muted);font-size:8px;font-weight:400;">CREWED · ADS-B</span></div>
+      <div><span style="color:${colors.textMuted}">ICAO  </span>${ac.icao || '—'}</div>
+      <div><span style="color:${colors.textMuted}">ALT   </span>${fmtAltFt(alt, imperial)}${altSrc}</div>
+      <div><span style="color:${colors.textMuted}">SPD   </span>${fmtSpeedKt(ac.gs, imperial)}</div>
+      <div><span style="color:${colors.textMuted}">TRK   </span>${ac.track != null ? Math.round(ac.track) + '°' : '—'}</div>
+      <div><span style="color:${colors.textMuted}">V/S   </span>${vstxt}</div>
+      <div><span style="color:${colors.textMuted}">SQWK  </span>${ac.squawk || '—'}</div>
+      <div style="margin-top:3px;color:${colors.textMuted}">heard by ${ac.node_id || '—'}</div>
+      ${lowline}
     </div>`
 }
 
@@ -249,6 +308,21 @@ const css = `
 .map-mlat-toggle.on { border-color:var(--ice-dim); color:var(--ice); }
 .mlat-dot { width:7px; height:7px; border-radius:50%; border:2px dashed var(--ice); flex-shrink:0; }
 
+.map-adsb-toggle {
+  position:absolute; top:88px; right:10px; z-index:800;
+  background:rgba(21,24,20,0.92); border:1px solid var(--border);
+  border-radius:4px; padding:5px 10px; font-family:var(--mono); font-size:9px;
+  color:var(--muted); cursor:pointer; display:flex; align-items:center; gap:6px;
+  backdrop-filter:blur(8px); transition:all 0.15s;
+}
+.map-adsb-toggle:hover { border-color:var(--border-hi); color:var(--text); }
+.map-adsb-toggle.on { border-color:#9FB4C4; color:#CFE0EA; }
+.adsb-dot {
+  width:0; height:0; flex-shrink:0;
+  border-left:4px solid transparent; border-right:4px solid transparent;
+  border-bottom:8px solid #9FB4C4;
+}
+
 /* ── Tactical map chrome ─────────────────────────────────────────── */
 .kx-chrome { position:absolute; inset:0; z-index:650; pointer-events:none; }
 .kx-corner { position:absolute; width:16px; height:16px; border:1px solid var(--border-hi); opacity:0.7; }
@@ -323,6 +397,7 @@ export default function MapView() {
   const trackPtsRef = useRef({})
   const rfMarkRef   = useRef({})
   const rfCircRef   = useRef({})
+  const acMarkRef   = useRef({})
   const opMarkRef   = useRef({})
   const opLineRef   = useRef({})
   const reticleRef  = useRef(null)
@@ -333,12 +408,24 @@ export default function MapView() {
   const drones      = useStore(selectActiveDrones)
   const nodes       = useStore(selectAllNodes)
   const rfContacts  = useStore(selectRfContacts)
+  const aircraft    = useStore(selectAircraft)
   const showMlat    = useStore(s => s.showMlatLayer)
+  const showAircraft = useStore(s => s.showAircraftLayer)
+  const alerts      = useStore(s => s.alerts)
   const selectDrone = useStore(s => s.selectDrone)
   const selectedId  = useStore(s => s.selectedDroneId)
   const toggleMlat  = useStore(s => s.toggleMlatLayer)
+  const toggleAircraft = useStore(s => s.toggleAircraftLayer)
   const liveActiveS = useStore(s => s.liveActiveS)
   const imperial    = useUnits()
+
+  // ICAO hexes with an open low-aircraft advisory — the map highlight tracks the
+  // server's alert (ref_id "aircraft:<icao>"), not a client-side AGL guess.
+  const lowIcaos = useMemo(() => new Set(
+    alerts
+      .filter(a => !a.acknowledged && a.category === 'low_aircraft' && a.ref_id)
+      .map(a => a.ref_id.replace(/^aircraft:/, ''))
+  ), [alerts])
   dronesRef.current = drones   // latest positions, read on selection without re-firing fly-to
 
   useEffect(() => {
@@ -568,6 +655,41 @@ export default function MapView() {
     }
   }, [rfContacts, imperial, liveActiveS])
 
+  // ── Crewed aircraft (ADS-B) ───────────────────────────────────────────────
+  useEffect(() => {
+    const map = leafletRef.current
+    if (!map) return
+
+    // Layer toggled off: drop every plane marker and stop.
+    if (!showAircraft) {
+      for (const id of Object.keys(acMarkRef.current)) {
+        map.removeLayer(acMarkRef.current[id]); delete acMarkRef.current[id]
+      }
+      return
+    }
+
+    const live = new Set(aircraft.map(a => a.icao))
+    for (const id of Object.keys(acMarkRef.current)) {
+      if (!live.has(id)) { map.removeLayer(acMarkRef.current[id]); delete acMarkRef.current[id] }
+    }
+
+    for (const ac of aircraft) {
+      const id = ac.icao
+      if (!id) continue
+      const ll  = [ac.lat, ac.lon]
+      const low = lowIcaos.has(id)
+      if (acMarkRef.current[id]) {
+        acMarkRef.current[id].setLatLng(ll).setIcon(aircraftIcon(ac, low))
+        if (acMarkRef.current[id].isPopupOpen())
+          acMarkRef.current[id].setPopupContent(aircraftPopupHtml(ac, imperial, low))
+      } else {
+        acMarkRef.current[id] = L.marker(ll, { icon: aircraftIcon(ac, low), zIndexOffset: 6 })
+          .bindPopup(aircraftPopupHtml(ac, imperial, low), { maxWidth: 240 })
+          .addTo(map)
+      }
+    }
+  }, [aircraft, showAircraft, lowIcaos, imperial])
+
   useEffect(() => {
     const map = leafletRef.current
     if (!map) return
@@ -657,6 +779,10 @@ export default function MapView() {
           <div className="mlat-dot"/>
           MLAT {showMlat ? 'ON' : 'OFF'}
         </div>
+        <div className={`map-adsb-toggle ${showAircraft ? 'on' : ''}`} onClick={toggleAircraft}>
+          <div className="adsb-dot"/>
+          ADS-B {showAircraft ? `ON · ${aircraft.length}` : 'OFF'}
+        </div>
         <div className="map-legend">
           <div className="map-legend-title">Legend</div>
           {[
@@ -673,6 +799,11 @@ export default function MapView() {
             <div style={{width:9,height:9,background:'var(--amber)',transform:'rotate(45deg)',
               boxShadow:'0 0 4px var(--amber)',flexShrink:0}}/>
             RF link (SDR)
+          </div>
+          <div className="map-legend-item">
+            <div style={{width:0,height:0,borderLeft:'4px solid transparent',
+              borderRight:'4px solid transparent',borderBottom:`9px solid ${AC_COLOR}`,flexShrink:0}}/>
+            Crewed aircraft (ADS-B)
           </div>
           <div className="map-legend-item">
             <div style={{width:9,height:9,borderRadius:'50%',border:`2px dashed ${colors.steelBlueLight}`,flexShrink:0}}/>

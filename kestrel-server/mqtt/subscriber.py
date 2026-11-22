@@ -25,7 +25,8 @@ from pydantic import ValidationError
 
 from core.config import Settings
 from db.database import get_pool
-from models.schemas import DetectionEvent, NodeHeartbeat, RFDetectionEvent
+from models.schemas import DetectionEvent, NodeHeartbeat, RFDetectionEvent, AircraftReport
+from core.aircraft_store import aircraft_store
 from analysis import rid_identity
 from mqtt.alert_engine import AlertEngine
 from mqtt.ws_broadcaster import WSBroadcaster
@@ -103,6 +104,7 @@ class MQTTSubscriber:
             await client.subscribe(f"{prefix}/+/status")
             await client.subscribe(f"{prefix}/+/rf_event")
             await client.subscribe(f"{prefix}/+/rf_detection")
+            await client.subscribe(f"{prefix}/+/aircraft")
             log.info(f"Subscribed to {prefix}/#")
 
             async for message in client.messages:
@@ -134,6 +136,8 @@ class MQTTSubscriber:
             await self._handle_rf_event(payload)
         elif msg_type == "rf_detection":
             await self._handle_rf_detection(payload)
+        elif msg_type == "aircraft":
+            await self._handle_aircraft(payload)
 
     # ------------------------------------------------------------------ #
     # Detection handler
@@ -389,6 +393,26 @@ class MQTTSubscriber:
     # ------------------------------------------------------------------ #
     # RF event handler
     # ------------------------------------------------------------------ #
+
+    async def _handle_aircraft(self, payload: dict):
+        """ADS-B picture from a node: store the current aircraft (the live_state
+        snapshot carries them to the dashboard) and run the low-aircraft
+        deconfliction check. Aircraft never enter the drone threat pipeline."""
+        try:
+            report = AircraftReport(**payload)
+        except ValidationError as e:
+            log.warning(f"Aircraft validation error: {e}")
+            return
+
+        aircraft = [ac.model_dump() for ac in report.aircraft]
+        aircraft_store.update(report.node_id, aircraft)
+        await self.alert_engine.evaluate_aircraft(
+            report.node_id,
+            report.node_position.lat,
+            report.node_position.lon,
+            report.node_position.alt,
+            aircraft,
+        )
 
     async def _handle_rf_event(self, payload: dict):
         pool = await get_pool()

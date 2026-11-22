@@ -51,6 +51,7 @@ READONLY_DISPLAY = [
     "db_host", "db_name", "mqtt_host", "mqtt_port",
     "alert_speed_threshold_ms", "alert_no_rid_min_alt_m", "alert_operator_max_km",
     "alert_dedup_window_s",
+    "alert_low_aircraft_agl_ft", "alert_low_aircraft_radius_km", "alert_low_aircraft_cooldown_s",
     "rf_alert_min_confidence", "rf_correlation_radius_m",
     "flight_gap_s", "flight_min_points",
     "server_health_interval_s", "ws_broadcast_interval_ms",

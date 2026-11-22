@@ -20,6 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from core.config import get_settings
 from core import runtime_settings as rt
+from core.aircraft_store import aircraft_store
 from db.database import get_pool
 from mqtt.ws_broadcaster import get_manager
 
@@ -146,6 +147,7 @@ async def _build_live_state() -> dict:
         "nodes":          [_row_to_dict(r) for r in node_rows],
         "recent_alerts":  [_row_to_dict(r) for r in alert_rows],
         "rf_contacts":    [_row_to_dict(r) for r in rf_rows],
+        "aircraft":       aircraft_store.current(),
         "detection_rate": det_rate,
         "live_active_s":  rt.get("live_active_s"),
         "ts":             time.time(),

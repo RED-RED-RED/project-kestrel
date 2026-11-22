@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     alert_speed_threshold_ms: float = 30.0     # Flag suspiciously fast drones
     alert_operator_max_km: float = 5.0         # Flag operator position farther than this from the drone (possible spoof)
     alert_dedup_window_s: int = 60             # Don't re-alert for same drone within window
+    alert_low_aircraft_agl_ft: float = 400.0   # Crewed aircraft below this AGL near a node -> deconfliction advisory
+    alert_low_aircraft_radius_km: float = 8.0  # Only alert on aircraft within this range of a node
+    alert_low_aircraft_cooldown_s: float = 120.0  # Re-alert interval for a loitering low aircraft
 
     # RF contacts (SDR-classified links)
     rf_correlation_window_s: int = 20          # RID track must be this fresh to correlate

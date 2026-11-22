@@ -49,6 +49,7 @@ export const useStore = create((set, get) => ({
   alerts:        [],      // AlertOut[], max 200
   recentPackets: [],      // raw detection + rf events, max 150
   rfContacts:    {},      // contact_id → RFContact (SDR-classified links)
+  aircraft:      [],      // crewed aircraft (ADS-B), list from server, ~1 Hz, TTL'd
   detectionRate: 0,
   lastStateTs:   null,
   liveActiveS:   120,     // age (s) under which a contact is "live"; older = stale/dimmed
@@ -69,6 +70,7 @@ export const useStore = create((set, get) => ({
   selectedNodeId:  null,
   activePanel:     'map',   // 'map' | 'threats' | 'packets'
   showMlatLayer:   true,    // toggle MLAT overlays on map
+  showAircraftLayer: true,  // toggle crewed-aircraft (ADS-B) layer on map
 
   // ── WebSocket ───────────────────────────────────────────────────────────
   connect() {
@@ -135,6 +137,7 @@ export const useStore = create((set, get) => ({
     }
 
     set({ drones, nodes, rfContacts, dismissed,
+          aircraft: payload.aircraft || [],
           alerts: payload.recent_alerts || [],
           detectionRate: payload.detection_rate || 0,
           liveActiveS: payload.live_active_s ?? get().liveActiveS,
@@ -313,6 +316,7 @@ export const useStore = create((set, get) => ({
   clearSelection()      { set({ selectedDroneId: null, selectedNodeId: null }) },
   setPanel(p)           { set({ activePanel: p }) },
   toggleMlatLayer()     { set(s => ({ showMlatLayer: !s.showMlatLayer })) },
+  toggleAircraftLayer() { set(s => ({ showAircraftLayer: !s.showAircraftLayer })) },
 }))
 
 // ── Selectors ──────────────────────────────────────────────────────────────
@@ -352,6 +356,34 @@ export const selectRfContacts = s =>
 // "Dark" links: a classified drone link with no Remote ID broadcast correlating.
 export const selectDarkContacts = s =>
   Object.values(s.rfContacts).filter(c => c.correlated === false && !s.dismissed[c.contact_id])
+
+// Crewed aircraft (ADS-B). On-ground and position-less targets are dropped so
+// the layer stays an airspace picture. Sorted by callsign for a stable list.
+export const selectAircraft = s =>
+  (s.aircraft || [])
+    .filter(a => !a.on_ground && a.lat != null && a.lon != null)
+    .sort((a, b) => (a.callsign || a.icao || '').localeCompare(b.callsign || b.icao || ''))
+
+// ICAO hexes that currently have an open low-aircraft deconfliction advisory.
+// Derived from the server's alerts (ref_id "aircraft:<icao>"), so the map cue
+// tracks the authoritative server decision rather than re-deriving AGL client-side.
+export const selectLowAircraftIcaos = s =>
+  new Set(
+    s.alerts
+      .filter(a => !a.acknowledged && a.category === 'low_aircraft' && a.ref_id)
+      .map(a => a.ref_id.replace(/^aircraft:/, ''))
+  )
+
+// ADS-B altitude is in feet, ground speed in knots — convert for metric, and
+// keep knots for speed (aviation convention) with km/h only when metric.
+export function fmtAltFt(ft, imperial) {
+  if (ft == null) return '—'
+  return imperial ? `${Math.round(ft)} ft` : `${Math.round(ft * 0.3048)} m`
+}
+export function fmtSpeedKt(kt, imperial) {
+  if (kt == null) return '—'
+  return imperial ? `${Math.round(kt)} kt` : `${Math.round(kt * 1.852)} km/h`
+}
 
 export const RF_SIGNAL_LABELS = {
   dji_ocusync:      'DJI OcuSync',
