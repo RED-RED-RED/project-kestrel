@@ -227,6 +227,24 @@ class MQTTPublisher:
         topic = f"kestrel/{self.node_id}/rf_detection"
         self._enqueue(topic, payload, qos=0)
 
+    def publish_aircraft(self, aircraft: list, gps):
+        """
+        Publish the current crewed-aircraft picture (ADS-B) to
+        kestrel/<node>/aircraft as one message per poll (full current list).
+
+        Informational only — the server keeps these out of the drone threat
+        pipeline, but flags low, nearby aircraft for deconfliction.
+        """
+        payload = {
+            "node_id": self.node_id,
+            "node_position": {"lat": gps.lat, "lon": gps.lon, "alt": gps.alt},
+            "aircraft": aircraft,
+            "count": len(aircraft),
+            "ts": time.time(),
+        }
+        topic = f"kestrel/{self.node_id}/aircraft"
+        self._enqueue(topic, payload, qos=0)
+
     # ------------------------------------------------------------------ #
     # Internals
     # ------------------------------------------------------------------ #

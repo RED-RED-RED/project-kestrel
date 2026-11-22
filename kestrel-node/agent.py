@@ -23,11 +23,12 @@ import threading
 import time
 from pathlib import Path
 
-from config.settings import load_config, NodeConfig
+from config.settings import load_config, NodeConfig, resolve_sdrs
 from banner import banner
 from scanner.wifi_nan import WiFiNANScanner
 from scanner.bluetooth import BluetoothScanner
 from scanner.sdr import SDRScanner
+from scanner.adsb import ADSBScanner
 from publisher.mqtt_client import MQTTPublisher
 from publisher.gps import GPSDaemon
 
@@ -144,24 +145,43 @@ def main():
         threads.append(t)
         log.info(f"Bluetooth scanner → hci{cfg.bt_hci_index} (Coded PHY={cfg.bt_coded_phy})")
 
-    # RTL-SDR (optional — passive RF fingerprinting)
-    if cfg.sdr_enabled:
+    # SDR radios (optional — passive RF fingerprinting). Supports several at
+    # once, e.g. an RTL-SDR on the sub-GHz control bands plus a HackRF on
+    # 2.4/5.8 GHz, each running its own parallel sweep.
+    sdr_radios = resolve_sdrs(cfg)
+    for i, radio in enumerate(sdr_radios):
         sdr = SDRScanner(
-            device_index=cfg.sdr_device_index,
+            device_index=radio["device_index"],
             publisher=publisher,
             gps=gps,
             node_id=cfg.node_id,
             stop_event=_stop_event,
-            backend=cfg.sdr_backend,
-            sample_rate=(cfg.sdr_sample_rate or None),
+            backend=radio["backend"],
+            sample_rate=radio["sample_rate"],
+            bands=radio["bands"],
             dwell_s=cfg.sdr_dwell_s,
             min_confidence=cfg.sdr_min_confidence,
             publish_interval_s=cfg.sdr_publish_interval_s,
             rssi_offset_dbm=cfg.sdr_rssi_offset_dbm,
         )
-        t = threading.Thread(target=sdr.run, name="sdr", daemon=True)
+        t = threading.Thread(target=sdr.run, name=f"sdr-{radio['backend']}-{i}", daemon=True)
         threads.append(t)
-        log.info(f"SDR scanner → {cfg.sdr_backend} (device {cfg.sdr_device_index})")
+        bands_desc = ",".join(radio["bands"]) if radio["bands"] else "auto"
+        log.info(f"SDR scanner → {radio['backend']} (device {radio['device_index']}, bands {bands_desc})")
+
+    # ADS-B (optional — crewed aircraft via dump1090 on a dedicated 1090 dongle)
+    if cfg.adsb_enabled:
+        adsb = ADSBScanner(
+            publisher=publisher,
+            gps=gps,
+            node_id=cfg.node_id,
+            stop_event=_stop_event,
+            source_url=cfg.adsb_source_url,
+            publish_interval_s=cfg.adsb_publish_interval_s,
+            max_age_s=cfg.adsb_max_age_s,
+        )
+        threads.append(threading.Thread(target=adsb.run, name="adsb", daemon=True))
+        log.info(f"ADS-B scanner → {cfg.adsb_source_url}")
 
     if not threads:
         log.error("No scanners enabled — check config. Exiting.")
@@ -176,7 +196,8 @@ def main():
     active_radios = []
     if wifi_bands_active:    active_radios.append("wifi")
     if cfg.bt_enabled:       active_radios.append("bt")
-    if cfg.sdr_enabled:      active_radios.append("sdr")
+    if sdr_radios:           active_radios.append("sdr")
+    if cfg.adsb_enabled:     active_radios.append("adsb")
 
     # ---- Heartbeat loop ----
     try:

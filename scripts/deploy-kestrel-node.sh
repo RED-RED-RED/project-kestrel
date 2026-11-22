@@ -36,7 +36,7 @@ LOG_DIR="/var/log/kestrel-node"
 # ── Argument parsing ─────────────────────────────────────────────────────
 UNATTENDED=false
 OPT_NODE_ID=""; OPT_SERVER_IP=""; OPT_MQTT_PASS=""
-OPT_WIFI_IFACE="wlan1"; OPT_WIFI_IFACE_5G=""; OPT_SDR=false
+OPT_WIFI_IFACE="wlan1"; OPT_WIFI_IFACE_5G=""; OPT_SDR=false; OPT_ADSB=false
 OPT_REPO=""; OPT_GPS_MODE="usb"; OPT_MQTT_FALLBACK=""
 
 while [[ $# -gt 0 ]]; do
@@ -49,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --wifi-iface)      OPT_WIFI_IFACE="$2";    shift;;
     --wifi-iface-5g)   OPT_WIFI_IFACE_5G="$2"; shift;;
     --enable-sdr)      OPT_SDR=true;;
+    --enable-adsb)     OPT_ADSB=true;;
     --repo)            OPT_REPO="$2";          shift;;
     --gps-mode)        OPT_GPS_MODE="$2";      shift;;
     *) warn "Unknown argument: $1";;
@@ -136,6 +137,8 @@ else
 fi
 
 SDR_STR="false";   [[ "$ENABLE_SDR"    == true ]] && SDR_STR="true"
+ENABLE_ADSB="${OPT_ADSB:-false}"
+ADSB_STR="false";  [[ "$ENABLE_ADSB"   == true ]] && ADSB_STR="true"
 WIFI_5G_STR="false"; [[ -n "$WIFI_IFACE_5G" ]] && WIFI_5G_STR="true"
 GPS_MODE="${GPS_MODE:-usb}"
 
@@ -145,6 +148,7 @@ info "Server     : ${BOLD}${SERVER_IP}${NC}"
 info "Wi-Fi 2.4G : ${WIFI_IFACE}"
 info "Wi-Fi 5G   : ${WIFI_IFACE_5G:-(not fitted)}"
 info "SDR        : ${SDR_STR}"
+info "ADS-B      : ${ADSB_STR}"
 info "GPS mode   : ${GPS_MODE}"
 echo ""
 
@@ -159,6 +163,30 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   rtl-sdr librtlsdr-dev \
   usbutils tcpdump mosquitto-clients
 ok "Packages installed"
+
+# dump1090-fa for ADS-B (crewed-aircraft awareness) — only when enabled. It
+# decodes 1090 MHz on its own dedicated RTL-SDR and the node agent just reads
+# its aircraft.json. Best-effort from the FlightAware apt repo, so a repo hiccup
+# never aborts the node deploy; see docs/adsb.md for the dongle-serial setup.
+if [[ "$ADSB_STR" == "true" ]] && ! command -v dump1090-fa >/dev/null 2>&1; then
+  step 1b "dump1090-fa (ADS-B 1090 MHz)"
+  _tmp="$(mktemp -d)"
+  if wget -qO "$_tmp/fa-repo.deb" \
+       "https://www.flightaware.com/adsb/piaware/files/packages/pool/piaware/f/flightaware-apt-repository/flightaware-apt-repository_1.2_all.deb" \
+     && dpkg -i "$_tmp/fa-repo.deb" >/dev/null 2>&1; then
+    apt-get update -qq || true
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y dump1090-fa >/dev/null 2>&1; then
+      ok "dump1090-fa installed"
+      warn "Running 2+ RTL-SDRs: set unique dongle serials and point dump1090 at the"
+      warn "1090 one — see docs/adsb.md — or it may grab the sub-GHz dongle."
+    else
+      warn "dump1090-fa install failed — install it manually (docs/adsb.md)"
+    fi
+  else
+    warn "Could not add the FlightAware repo — install dump1090-fa manually (docs/adsb.md)"
+  fi
+  rm -rf "$_tmp"
+fi
 
 # ── 2/8  Hardware configuration ──────────────────────────────────────────
 step 2 "Hardware configuration"
@@ -279,9 +307,24 @@ bt:
   coded_phy: true
   backend: auto             # direct HCI access to the dongle, bleak fallback
 
-sdr:
-  enabled: ${SDR_STR}
-  device_index: 0
+# SDR radios — each entry is an independent receiver with its own sweep.
+# The RTL-SDR covers the sub-GHz control bands. Add a HackRF for 2.4/5.8 GHz
+# by flipping its enabled to true (band codes: 433, 900, 1g2, 2g4, 5g8).
+sdrs:
+  - enabled: ${SDR_STR}
+    backend: rtlsdr
+    device_index: 0
+    bands: ["900", "1g2", "433"]
+  - enabled: false
+    backend: hackrf
+    device_index: 0
+    bands: ["2g4", "5g8"]
+
+# ADS-B — crewed aircraft via dump1090-fa on a dedicated 1090 MHz RTL-SDR.
+# See docs/adsb.md for the dongle serial setup when running multiple RTL-SDRs.
+adsb:
+  enabled: ${ADSB_STR}
+  source_url: "http://127.0.0.1:8080/data/aircraft.json"
 
 heartbeat_interval_s: 10
 dedup_window_s: 2.0

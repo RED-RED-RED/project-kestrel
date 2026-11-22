@@ -79,6 +79,19 @@ class NodeConfig:
     sdr_publish_interval_s: float = 3.0  # per (band, signal type) rate limit
     sdr_rssi_offset_dbm: float = -50.0   # uncalibrated: maps peak dBFS to a pseudo-dBm
 
+    # Optional: run several SDR radios at once, e.g. an RTL-SDR on the sub-GHz
+    # control bands plus a HackRF on 2.4/5.8 GHz, each on its own sweep so the
+    # bands are covered in parallel instead of time-shared. Each entry:
+    #   {enabled, backend, device_index, bands, sample_rate}
+    # When this list is empty the single legacy sdr_* block above is used.
+    sdrs: list = field(default_factory=list)
+
+    # ---- ADS-B (crewed aircraft via dump1090) ----
+    adsb_enabled: bool = False                 # needs dump1090-fa on a dedicated 1090 MHz dongle
+    adsb_source_url: str = "http://127.0.0.1:8080/data/aircraft.json"
+    adsb_publish_interval_s: float = 1.0       # aircraft.json refreshes ~1 Hz
+    adsb_max_age_s: float = 30.0               # drop aircraft not heard within this
+
     # ---- Agent behaviour ----
     heartbeat_interval_s: int = 10
     dedup_window_s: float = 2.0          # Suppress duplicate detections within this window
@@ -117,6 +130,35 @@ def load_config() -> NodeConfig:
     _apply_env(cfg)
     _apply_wifi_backward_compat(cfg, data)
     return cfg
+
+
+def resolve_sdrs(cfg: NodeConfig) -> list[dict]:
+    """Normalise SDR config into the list of radios to run.
+
+    Prefers the new `sdrs:` list (one entry per physical SDR). Falls back to the
+    legacy single `sdr:` block so existing configs keep working unchanged.
+    Each returned dict has: backend, device_index, bands (or None = auto to the
+    source's tunable range), sample_rate (or None = backend default).
+    """
+    radios: list[dict] = []
+    if cfg.sdrs:
+        for entry in cfg.sdrs:
+            if not isinstance(entry, dict) or not entry.get("enabled", True):
+                continue
+            radios.append({
+                "backend":      str(entry.get("backend", "rtlsdr")),
+                "device_index": int(entry.get("device_index", 0)),
+                "bands":        entry.get("bands") or None,
+                "sample_rate":  entry.get("sample_rate") or None,
+            })
+    elif cfg.sdr_enabled:
+        radios.append({
+            "backend":      cfg.sdr_backend,
+            "device_index": cfg.sdr_device_index,
+            "bands":        None,
+            "sample_rate":  cfg.sdr_sample_rate or None,
+        })
+    return radios
 
 
 
