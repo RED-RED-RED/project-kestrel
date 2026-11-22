@@ -3,7 +3,7 @@ import { useEffect, useRef, useMemo } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useStore, selectActiveDrones, selectAllNodes, selectRfContacts, selectAircraft, isStale,
-         RF_SIGNAL_LABELS, RF_BAND_LABELS, useUnits, fmtAlt, fmtSpeed, fmtDist,
+         RF_SIGNAL_LABELS, RF_BAND_LABELS, useUnits, fmtAgl, fmtSpeed, fmtDist,
          fmtAltFt, fmtSpeedKt } from '../store/useStore'
 import { colors } from '../theme/colors'
 
@@ -93,8 +93,8 @@ function aircraftIcon(ac, low = false) {
 function aircraftPopupHtml(ac, imperial = false, low = false) {
   const color = low ? colors.threatHigh : AC_COLOR
   const label = ac.callsign || ac.icao || 'aircraft'
-  const alt   = ac.alt_geom ?? ac.alt_baro
-  const altSrc = ac.alt_geom != null ? ' (geo)' : ac.alt_baro != null ? ' (baro)' : ''
+  const agl   = ac.agl_ft == null ? '—' : '~' + fmtAltFt(Math.max(ac.agl_ft, 0), imperial)
+  const aglSrc = ac.agl_src === 'baro' ? ', baro' : ''
   const vs    = ac.vert_rate
   const vstxt = vs == null ? '—'
     : `${vs > 50 ? '▲ ' : vs < -50 ? '▼ ' : ''}${Math.abs(Math.round(vs))} fpm`
@@ -107,7 +107,7 @@ function aircraftPopupHtml(ac, imperial = false, low = false) {
         margin-bottom:4px;text-transform:uppercase;">${label}
         <span style="color:var(--text-muted);font-size:8px;font-weight:400;">CREWED · ADS-B</span></div>
       <div><span style="color:${colors.textMuted}">ICAO  </span>${ac.icao || '—'}</div>
-      <div><span style="color:${colors.textMuted}">ALT   </span>${fmtAltFt(alt, imperial)}${altSrc}</div>
+      <div><span style="color:${colors.textMuted}">AGL   </span>${agl}<span style="color:${colors.textMuted};font-size:9px;"> rel. to ${ac.node_id || 'node'} ground${aglSrc}</span></div>
       <div><span style="color:${colors.textMuted}">SPD   </span>${fmtSpeedKt(ac.gs, imperial)}</div>
       <div><span style="color:${colors.textMuted}">TRK   </span>${ac.track != null ? Math.round(ac.track) + '°' : '—'}</div>
       <div><span style="color:${colors.textMuted}">V/S   </span>${vstxt}</div>
@@ -270,8 +270,8 @@ function dronePopupHtml(drone, imperial = false) {
     <div>${rid}</div>
     <div style="color:${colors.textMuted}">${drone.ua_type || 'Unknown type'}</div>
     <hr style="border-color:${colors.bgBorder};margin:5px 0"/>
-    <div><span style="color:${colors.textMuted}">ALT  </span>${fmtAlt(drone.alt_baro, imperial)}</div>
-    <div><span style="color:${colors.textMuted}">AGL  </span>${fmtAlt(drone.height_agl, imperial)}</div>
+    <div><span style="color:${colors.textMuted}">AGL  </span>${fmtAgl(drone, imperial)}${drone.agl_src === 'est'
+      ? `<span style="color:${colors.textMuted};font-size:9px;"> est. from node ground</span>` : ''}</div>
     <div><span style="color:${colors.textMuted}">SPD  </span>${fmtSpeed(drone.speed_h, imperial)}</div>
     <div><span style="color:${colors.textMuted}">HDG  </span>${drone.heading?.toFixed(0)??'—'}°</div>
     <div><span style="color:${colors.textMuted}">OP   </span><span style="color:${colors.textPrimary}">${drone.operator_id||'—'}</span></div>

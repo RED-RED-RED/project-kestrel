@@ -263,7 +263,7 @@ export default function FlightHistory() {
             </div>
             {cur && (
               <div className="fh-readout">
-                <span>ALT {fmtAlt(cur.alt_m, imperial)}</span>
+                <span>AGL {fmtAlt(cur.agl_m, imperial)}</span>
                 <span>SPD {fmtSpeed(cur.speed_ms, imperial)}</span>
                 <span>HDG {cur.heading != null ? Math.round(cur.heading) + '°' : '—'}</span>
                 <span>RSSI {cur.rssi != null ? Math.round(cur.rssi) + 'dBm' : '—'}</span>
@@ -271,8 +271,10 @@ export default function FlightHistory() {
               </div>
             )}
             <div className="fh-sparks">
-              <Spark values={detail.path.map(p => p.alt_m)}   label="Altitude" unit="m"   color={colors.steelBlueLight} />
-              <Spark values={detail.path.map(p => p.speed_ms)} label="Speed"    unit="m/s" color={colors.olive} />
+              <Spark values={detail.path.map(p => p.agl_m == null ? null : (imperial ? p.agl_m * 3.28084 : p.agl_m))}
+                     label="Height AGL" unit={imperial ? 'ft' : 'm'} color={colors.steelBlueLight} />
+              <Spark values={detail.path.map(p => p.speed_ms == null ? null : (imperial ? p.speed_ms * 2.23694 : p.speed_ms))}
+                     label="Speed" unit={imperial ? 'mph' : 'm/s'} color={colors.olive} />
             </div>
           </div>
         )}

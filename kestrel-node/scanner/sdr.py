@@ -84,8 +84,10 @@ class SDRScanner:
         min_confidence: float = 0.6,
         publish_interval_s: float = 3.0,
         rssi_offset_dbm: float = -50.0,
+        serial: Optional[str] = None,
     ):
         self.device_index = device_index
+        self.serial = serial
         self.publisher = publisher
         self.gps = gps
         self.node_id = node_id
@@ -113,7 +115,7 @@ class SDRScanner:
         if source is None:
             try:
                 source = make_source(self.backend, device_index=self.device_index,
-                                     sample_rate=self.sample_rate)
+                                     sample_rate=self.sample_rate, serial=self.serial)
             except SDRSourceError as e:
                 log.error(f"SDR backend unavailable: {e}. SDR scanner exiting.")
                 return

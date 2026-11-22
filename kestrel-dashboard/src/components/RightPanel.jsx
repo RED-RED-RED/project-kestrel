@@ -1,5 +1,5 @@
 // src/components/RightPanel.jsx
-import { useStore, selectActiveDrones, selectOpenAlerts, threatColor, threatLabel, useUnits, fmtAlt, fmtSpeed, fmtDist, selectHighAlerts } from '../store/useStore'
+import { useStore, selectActiveDrones, selectOpenAlerts, threatColor, threatLabel, useUnits, fmtAgl, fmtClimb, fmtSpeed, fmtDist, selectHighAlerts } from '../store/useStore'
 import { formatDistanceToNow } from 'date-fns'
 
 const css = `
@@ -355,7 +355,7 @@ function DroneRow({ drone, selected, onClick }) {
         </div>
       </div>
       <div className="dr-meta">
-        <span>▲ {fmtAlt(drone.alt_baro, imperial)}</span>
+        <span>▲ {fmtAgl(drone, imperial)} AGL</span>
         <span>⟶ {fmtSpeed(drone.speed_h, imperial)}</span>
         <span className="dr-meta-t">{drone.last_transport?.toUpperCase() || '—'}</span>
         {drone.mlat_mismatch_m > 250 && (
@@ -406,12 +406,15 @@ function DroneDetail({ drone }) {
           <div className={`dc-val ${noRid ? 'danger' : 'green'}`}>{noRid ? '⚠ NO RID' : '✓ OK'}</div>
         </div>
         <div className="detail-cell">
-          <div className="dc-label">Alt (baro)</div>
-          <div className="dc-val amber">{fmtAlt(drone.alt_baro, imperial)}</div>
+          <div className="dc-label">Height AGL</div>
+          <div className="dc-val amber"
+               title={drone.agl_src === 'est' ? 'Estimated from the detecting node\'s ground elevation' : undefined}>
+            {fmtAgl(drone, imperial)}
+          </div>
         </div>
         <div className="detail-cell">
-          <div className="dc-label">Height AGL</div>
-          <div className="dc-val amber">{fmtAlt(drone.height_agl, imperial)}</div>
+          <div className="dc-label">Climb</div>
+          <div className="dc-val">{fmtClimb(drone.speed_v, imperial)}</div>
         </div>
         <div className="detail-cell">
           <div className="dc-label">Speed</div>

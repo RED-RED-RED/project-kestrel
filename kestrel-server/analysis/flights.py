@@ -14,6 +14,7 @@ position and are handled separately (they are not flights).
 from __future__ import annotations
 
 from datetime import datetime
+from analysis.agl import resolve_drone_agl
 
 
 def _epoch(t) -> float:
@@ -108,6 +109,13 @@ def summarize(session: list[dict], threat: dict | None = None) -> dict:
     }
 
 
+def _agl(r: dict):
+    """Stored AGL, or resolved now for rows recorded before agl_m existed."""
+    if r.get("agl_m") is not None:
+        return r["agl_m"]
+    return resolve_drone_agl(r.get("height_agl"), r.get("alt_geo"), r.get("node_alt"))[0]
+
+
 def detail(session: list[dict], threat: dict | None = None) -> dict:
     """One flight -> full detail with the ordered path and derived series."""
     s = summarize(session, threat)
@@ -119,7 +127,7 @@ def detail(session: list[dict], threat: dict | None = None) -> dict:
             "lat":     r.get("lat"),
             "lon":     r.get("lon"),
             "alt_m":   r.get("alt_geo") if r.get("alt_geo") is not None else r.get("alt_baro"),
-            "agl_m":   r.get("height_agl"),
+            "agl_m":   _agl(r),
             "speed_ms": r.get("speed_h"),
             "heading": r.get("heading"),
             "rssi":    r.get("rssi"),

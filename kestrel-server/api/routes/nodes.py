@@ -41,7 +41,7 @@ async def node_detections(node_id: str, limit: int = 100):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT detected_at, drone_id, transport, rssi,
-                   drone_lat, drone_lon, alt_baro, speed_h, status
+                   drone_lat, drone_lon, alt_baro, agl_m, agl_src, speed_h, status
             FROM detections
             WHERE node_id = $1
             ORDER BY detected_at DESC

@@ -4,7 +4,7 @@
 
 import { useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
-import { useStore, selectActiveDrones, selectRfContacts, selectDarkContacts, isStale, FACTOR_LABELS, threatColor, threatBg, threatLabel, useUnits, fmtAlt, fmtSpeed, fmtDist } from '../store/useStore'
+import { useStore, selectActiveDrones, selectRfContacts, selectDarkContacts, isStale, FACTOR_LABELS, threatColor, threatBg, threatLabel, useUnits, droneAgl, fmtAgl, fmtClimb, fmtSpeed, fmtDist } from '../store/useStore'
 
 const css = `
 .tp-wrap {
@@ -385,7 +385,7 @@ export default function ThreatPanel() {
                     <div className="tdr-id">{d.drone_id}</div>
                     <div className="tdr-meta">
                       <span>{d.ua_type || 'unknown'}</span>
-                      {d.height_agl != null && <span>▲{fmtAlt(d.height_agl, imperial)}</span>}
+                      {droneAgl(d) != null && <span>▲{fmtAgl(d, imperial)} AGL</span>}
                       {d.speed_h    != null && <span>⟶{fmtSpeed(d.speed_h, imperial)}</span>}
                     </div>
                     <div className="tdr-flags">
@@ -436,8 +436,8 @@ export default function ThreatPanel() {
                 <div className="detail-section-head">Flight Data</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:4}}>
                   {[
-                    { label:'Altitude',  val: fmtAlt(drone.alt_baro, imperial) },
-                    { label:'Height AGL',val: fmtAlt(drone.height_agl, imperial) },
+                    { label:'Height AGL',val: fmtAgl(drone, imperial) },
+                    { label:'Climb',     val: fmtClimb(drone.speed_v, imperial) },
                     { label:'Speed',     val: fmtSpeed(drone.speed_h, imperial) },
                     { label:'Heading',   val: drone.heading   != null ? drone.heading.toFixed(0)+'°'      : '—' },
                     { label:'Position',  val: drone.lat       != null ? `${drone.lat.toFixed(4)}, ${drone.lon.toFixed(4)}` : '—' },

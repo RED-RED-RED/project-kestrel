@@ -145,8 +145,9 @@ class RtlSdrSource(IQSource):
     tune_range_hz = (24e6, 1.766e9)      # R820T/R828D ceiling
 
     def __init__(self, device_index: int = 0, sample_rate: float = 2.4e6,
-                 gain="auto"):
+                 gain="auto", serial: Optional[str] = None):
         self.device_index = device_index
+        self.serial = serial          # preferred: index order isn't stable across reboots
         self.sample_rate = float(sample_rate)
         self.gain = gain
         self._sdr = None
@@ -156,13 +157,21 @@ class RtlSdrSource(IQSource):
             from rtlsdr import RtlSdr
         except Exception as e:
             raise SDRSourceError(f"pyrtlsdr not available: {e}") from e
+        if self.serial:
+            try:
+                self.device_index = RtlSdr.get_device_index_by_serial(self.serial)
+            except Exception as e:
+                raise SDRSourceError(
+                    f"No RTL-SDR with serial {self.serial!r} (set one with rtl_eeprom -s): {e}"
+                ) from e
         try:
             self._sdr = RtlSdr(self.device_index)
             self._sdr.sample_rate = self.sample_rate
             self._sdr.gain = self.gain
         except Exception as e:
             raise SDRSourceError(f"Failed to open RTL-SDR {self.device_index}: {e}") from e
-        log.info(f"RTL-SDR open: device {self.device_index}, {self.sample_rate/1e6:.2f} MS/s")
+        which = f"serial {self.serial} (index {self.device_index})" if self.serial else f"device {self.device_index}"
+        log.info(f"RTL-SDR open: {which}, {self.sample_rate/1e6:.2f} MS/s")
 
     def set_center(self, freq_hz: float) -> None:
         self._sdr.center_freq = float(freq_hz)
@@ -212,11 +221,12 @@ class SyntheticSource(IQSource):
 
 
 def make_source(backend: str, device_index: int = 0, sample_rate: Optional[float] = None,
-                **kwargs) -> IQSource:
+                serial: Optional[str] = None, **kwargs) -> IQSource:
     """Factory: 'hackrf' | 'rtlsdr'. Raises SDRSourceError for unknown backends."""
     backend = (backend or "").lower()
     if backend == "hackrf":
         return HackRFSource(sample_rate=sample_rate or 20e6, **kwargs)
     if backend in ("rtlsdr", "rtl-sdr", "rtl"):
-        return RtlSdrSource(device_index=device_index, sample_rate=sample_rate or 2.4e6)
+        return RtlSdrSource(device_index=device_index, sample_rate=sample_rate or 2.4e6,
+                            serial=serial)
     raise SDRSourceError(f"Unknown SDR backend: {backend!r}")

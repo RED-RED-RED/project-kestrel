@@ -27,7 +27,7 @@ async def list_threats(
                 mlat_lat, mlat_lon, mlat_radius_m, mlat_mismatch_m,
                 spoof_confidence, mlat_node_count,
                 lat AS broadcast_lat, lon AS broadcast_lon,
-                operator_id, ua_type, height_agl, speed_h,
+                operator_id, ua_type, height_agl, agl_m, agl_src, speed_h,
                 last_seen, detecting_nodes, has_valid_rid,
                 analysis_updated_at
             FROM drone_tracks
@@ -63,7 +63,7 @@ async def get_drone_threat(drone_id: str):
                 mlat_lat, mlat_lon, mlat_radius_m, mlat_mismatch_m,
                 spoof_confidence, mlat_node_count,
                 lat AS broadcast_lat, lon AS broadcast_lon,
-                alt_baro, height_agl, speed_h, heading,
+                alt_baro, height_agl, agl_m, agl_src, speed_h, heading,
                 operator_id, id_type, ua_type,
                 operator_lat, operator_lon, description,
                 first_seen, last_seen, detection_count,

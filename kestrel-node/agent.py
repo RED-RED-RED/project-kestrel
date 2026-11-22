@@ -163,11 +163,13 @@ def main():
             min_confidence=cfg.sdr_min_confidence,
             publish_interval_s=cfg.sdr_publish_interval_s,
             rssi_offset_dbm=cfg.sdr_rssi_offset_dbm,
+            serial=radio.get("serial"),
         )
         t = threading.Thread(target=sdr.run, name=f"sdr-{radio['backend']}-{i}", daemon=True)
         threads.append(t)
         bands_desc = ",".join(radio["bands"]) if radio["bands"] else "auto"
-        log.info(f"SDR scanner → {radio['backend']} (device {radio['device_index']}, bands {bands_desc})")
+        which = f"serial {radio['serial']}" if radio.get("serial") else f"device {radio['device_index']}"
+        log.info(f"SDR scanner → {radio['backend']} ({which}, bands {bands_desc})")
 
     # ADS-B (optional — crewed aircraft via dump1090 on a dedicated 1090 dongle)
     if cfg.adsb_enabled:

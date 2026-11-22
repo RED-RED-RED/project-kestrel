@@ -44,6 +44,13 @@ EDITABLE: dict[str, dict] = {
     "live_window_s":           {"type": "int",   "group": "Live map", "label": "Remove after (s)"},
     # Remote ID make/model reference (FAA Declaration of Compliance source)
     "rid_doc_source_url":      {"type": "str",   "group": "Remote ID", "label": "FAA DoC source URL"},
+    # Low-aircraft deconfliction advisory (ADS-B) — live-editable
+    "alert_low_aircraft_agl_ft":     {"type": "float", "group": "Airspace (ADS-B)", "label": "Alert below (ft AGL)",
+                                      "min": 50, "max": 5000},
+    "alert_low_aircraft_radius_km":  {"type": "float", "group": "Airspace (ADS-B)", "label": "Within radius of a node (km)",
+                                      "min": 0.5, "max": 50},
+    "alert_low_aircraft_cooldown_s": {"type": "float", "group": "Airspace (ADS-B)", "label": "Re-alert same aircraft after (s)",
+                                      "min": 10, "max": 3600},
 }
 
 # Shown read-only in the GUI for visibility (never secret).
@@ -51,7 +58,6 @@ READONLY_DISPLAY = [
     "db_host", "db_name", "mqtt_host", "mqtt_port",
     "alert_speed_threshold_ms", "alert_no_rid_min_alt_m", "alert_operator_max_km",
     "alert_dedup_window_s",
-    "alert_low_aircraft_agl_ft", "alert_low_aircraft_radius_km", "alert_low_aircraft_cooldown_s",
     "rf_alert_min_confidence", "rf_correlation_radius_m",
     "flight_gap_s", "flight_min_points",
     "server_health_interval_s", "ws_broadcast_interval_ms",
@@ -62,13 +68,18 @@ _overrides: dict[str, object] = {}
 
 
 def _coerce(key: str, raw) -> object:
-    t = EDITABLE[key]["type"]
+    meta = EDITABLE[key]
+    t = meta["type"]
     if t == "bool":
         return str(raw).strip().lower() in ("1", "true", "yes", "on")
-    if t == "int":
-        return int(float(raw))
-    if t == "float":
-        return float(raw)
+    if t in ("int", "float"):
+        v = int(float(raw)) if t == "int" else float(raw)
+        # Clamp to the field's bounds, if it declares any.
+        if "min" in meta:
+            v = max(v, meta["min"])
+        if "max" in meta:
+            v = min(v, meta["max"])
+        return v
     return str(raw)
 
 
@@ -77,6 +88,11 @@ def get(key: str):
     if key in _overrides:
         return _overrides[key]
     return getattr(get_settings(), key)
+
+
+def get_override(key: str):
+    """The GUI-set value for key, or None when it's still on its .env default."""
+    return _overrides.get(key)
 
 
 def emergency_set() -> set[str]:
@@ -123,7 +139,7 @@ async def set_many(updates: dict) -> dict:
             await conn.execute("""
                 INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
                 ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
-            """, key, str(val))
+            """, key, str(coerced))
             _overrides[key] = coerced
             applied[key] = coerced
     return applied
@@ -141,6 +157,9 @@ def snapshot() -> dict:
         }
         if meta.get("choices"):
             entry["choices"] = meta["choices"]
+        for bound in ("min", "max"):
+            if bound in meta:
+                entry[bound] = meta[bound]
         if meta.get("secret"):
             entry["configured"] = bool(val)
         else:

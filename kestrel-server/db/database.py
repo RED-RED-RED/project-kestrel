@@ -173,6 +173,14 @@ async def _create_schema(pool: Pool):
             CREATE INDEX IF NOT EXISTS idx_detections_node_id_time
             ON detections (node_id, detected_at DESC);
         """)
+        # Resolved height above ground (analysis/agl.py), added post-launch
+        for col, dtype in [("agl_m", "REAL"), ("agl_src", "TEXT")]:
+            try:
+                await conn.execute(
+                    f"ALTER TABLE detections ADD COLUMN IF NOT EXISTS {col} {dtype};"
+                )
+            except Exception as e:
+                log.warning(f"detections.{col} migration skipped: {e}")
 
         # ---- drone_tracks table (live state, one row per drone) ----
         await conn.execute("""
@@ -239,6 +247,9 @@ async def _create_schema(pool: Pool):
             ("model",               "TEXT"),
             ("mfr_code",            "TEXT"),
             ("id_source",           "TEXT"),
+            # Resolved height above ground (analysis/agl.py)
+            ("agl_m",               "REAL"),
+            ("agl_src",             "TEXT"),
         ]:
             try:
                 await conn.execute(

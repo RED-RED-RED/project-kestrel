@@ -134,7 +134,11 @@ class ThreatScorer:
             f.position_mismatch = 0.85
 
         # ── Factor 3: High altitude without operator ID ────────────────────
-        alt_agl = drone.get("height_agl") or drone.get("alt_baro") or 0.0
+        # Resolved AGL (analysis/agl.py); rows from before that column existed
+        # fall back to the drone's own height field. Never barometric (~MSL).
+        alt_agl = drone.get("agl_m")
+        if alt_agl is None:
+            alt_agl = drone.get("height_agl") or 0.0
         if alt_agl > FAA_MAX_ALT_M and not op_id:
             # Linear ramp from 400ft to 800ft, clamped to 1.0
             f.high_altitude_no_rid = min(

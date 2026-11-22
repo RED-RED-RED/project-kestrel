@@ -277,6 +277,8 @@ export const useStore = create((set, get) => ({
         drone_id:  r.drone_id,
         rssi:      r.rssi,
         alt_baro:  r.alt_baro,
+        agl_m:     r.agl_m,
+        agl_src:   r.agl_src,
         speed_h:   r.speed_h,
         status:    r.status,
       }))
@@ -409,6 +411,26 @@ export function fmtAlt(metres, imperial) {
   if (metres == null) return '—'
   if (imperial) return `${Math.round(metres * 3.28084)} ft`
   return `${Math.round(metres)} m`
+}
+
+// Height above ground for a drone, in metres. The server resolves agl_m at
+// ingest (RID height field, else geodetic altitude minus the node's ground).
+// Rows from before that existed fall back to the drone's own height field.
+export const droneAgl = d => d?.agl_m ?? (d?.height_agl || null)
+
+// AGL with units; "~" marks an estimate from the node's ground elevation.
+export function fmtAgl(d, imperial) {
+  const m = droneAgl(d)
+  if (m == null) return '—'
+  return (d?.agl_src === 'est' ? '~' : '') + fmtAlt(m, imperial)
+}
+
+// Vertical speed with a direction arrow (ft/min imperial, m/s metric).
+export function fmtClimb(ms, imperial) {
+  if (ms == null) return '—'
+  const arrow = ms > 0.2 ? '▲ ' : ms < -0.2 ? '▼ ' : ''
+  return arrow + (imperial ? `${Math.abs(Math.round(ms * 196.85))} fpm`
+                           : `${Math.abs(ms).toFixed(1)} m/s`)
 }
 
 export function fmtSpeed(ms, imperial) {

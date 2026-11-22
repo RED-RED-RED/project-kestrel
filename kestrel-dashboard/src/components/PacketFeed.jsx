@@ -1,6 +1,6 @@
 // src/components/PacketFeed.jsx
 import { useEffect, useRef } from 'react'
-import { useStore } from '../store/useStore'
+import { useStore, useUnits, droneAgl, fmtAgl } from '../store/useStore'
 
 const css = `
 .pf-wrap {
@@ -95,6 +95,7 @@ const css = `
 
 export default function PacketFeed() {
   const packets  = useStore(s => s.recentPackets)
+  const imperial = useUnits()
   const feedRef  = useRef(null)
   const prevLen  = useRef(0)
 
@@ -178,7 +179,7 @@ export default function PacketFeed() {
                   {' '}
                   {pkt.rssi != null && `rssi=${pkt.rssi}dBm`}
                   {' '}
-                  {pkt.alt_baro != null && `alt=${pkt.alt_baro.toFixed(0)}m`}
+                  {droneAgl(pkt) != null && `agl=${fmtAgl(pkt, imperial).replace(' ', '')}`}
                   {' '}
                   {pkt.speed_h != null && `spd=${pkt.speed_h.toFixed(1)}m/s`}
                   {' '}

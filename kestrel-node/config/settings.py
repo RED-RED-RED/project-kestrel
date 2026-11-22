@@ -82,7 +82,8 @@ class NodeConfig:
     # Optional: run several SDR radios at once, e.g. an RTL-SDR on the sub-GHz
     # control bands plus a HackRF on 2.4/5.8 GHz, each on its own sweep so the
     # bands are covered in parallel instead of time-shared. Each entry:
-    #   {enabled, backend, device_index, bands, sample_rate}
+    #   {enabled, backend, device_index, serial, bands, sample_rate}
+    # serial (RTL-SDR) beats device_index: index order can change on reboot.
     # When this list is empty the single legacy sdr_* block above is used.
     sdrs: list = field(default_factory=list)
 
@@ -148,6 +149,7 @@ def resolve_sdrs(cfg: NodeConfig) -> list[dict]:
             radios.append({
                 "backend":      str(entry.get("backend", "rtlsdr")),
                 "device_index": int(entry.get("device_index", 0)),
+                "serial":       str(entry["serial"]) if entry.get("serial") else None,
                 "bands":        entry.get("bands") or None,
                 "sample_rate":  entry.get("sample_rate") or None,
             })
@@ -155,6 +157,7 @@ def resolve_sdrs(cfg: NodeConfig) -> list[dict]:
         radios.append({
             "backend":      cfg.sdr_backend,
             "device_index": cfg.sdr_device_index,
+            "serial":       None,
             "bands":        None,
             "sample_rate":  cfg.sdr_sample_rate or None,
         })

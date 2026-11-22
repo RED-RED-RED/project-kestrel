@@ -129,6 +129,7 @@ export default function SettingsPanel() {
                          onChange={e => set(f.key, e.target.value)} />
                 ) : (
                   <input type={f.type === 'int' || f.type === 'float' ? 'number' : 'text'}
+                         min={f.min} max={f.max} step={f.type === 'float' ? 'any' : undefined}
                          value={cur(f)} onChange={e => set(f.key, e.target.value)} />
                 )}
               </label>

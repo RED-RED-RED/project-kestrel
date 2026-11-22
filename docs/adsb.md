@@ -1,5 +1,10 @@
 # ADS-B (crewed-aircraft awareness)
 
+> **Requires a second RTL-SDR.** ADS-B needs its own dongle pinned to 1090 MHz
+> full-time. It cannot share the RTL-SDR that runs the sub-GHz band scan. Until
+> that second radio is installed, leave `adsb.enabled: false`; the dashboard's
+> ADS-B layer just shows `ON · 0` and nothing alerts.
+
 KESTREL can show crewed aircraft alongside drones by ingesting ADS-B. The node
 runs `dump1090-fa` (the standard 1090 MHz Mode S / ADS-B decoder) on its own
 dedicated RTL-SDR; the node agent reads dump1090's `aircraft.json` and
@@ -40,9 +45,18 @@ Then point each tool at its dongle by serial:
   RECEIVER_OPTIONS="--device ADSB1090 --gain -10 --ppm 0 --net-bo-port 30005 --fix"
   ```
   then `sudo systemctl restart dump1090-fa`.
-- **KESTREL sub-GHz scanner** — the `sdrs:` entry's `device_index` still selects
-  by index; with serials set, confirm it opens the `KESTREL` dongle (the log
-  prints which device it opened on start).
+- **KESTREL sub-GHz scanner** — add `serial:` to its `sdrs:` entry in
+  `/etc/kestrel-node/config.yaml` (serial wins over `device_index`):
+  ```yaml
+  sdrs:
+    - enabled: true
+      backend: rtlsdr
+      serial: KESTREL
+      bands: ["900", "1g2", "433"]
+  ```
+  then `sudo systemctl restart kestrel-node`. The log confirms it:
+  `RTL-SDR open: serial KESTREL (index N)`. An unknown serial fails loudly
+  instead of silently grabbing the 1090 dongle.
 
 ## Enable it
 
@@ -68,3 +82,32 @@ journalctl -u kestrel-node -f | grep -i adsb
 
 You should see the ADS-B scanner start, and aircraft appear on the dashboard's
 aircraft layer. A low, nearby aircraft also raises a deconfliction advisory.
+
+## How AGL is worked out
+
+Every altitude in the dashboard is height above ground (AGL).
+
+- **Aircraft:** GNSS altitude (`alt_geom`) minus the hearing node's ground
+  elevation. Both are WGS-84 ellipsoid heights, so the subtraction is clean. If
+  an aircraft only sends pressure altitude, that's used instead and marked
+  `baro` (rougher: uncorrected for local pressure). Shown as `~` because it
+  assumes the ground under the aircraft matches the node's; that holds near
+  the node, which is where the advisory looks.
+- **Drones:** the Remote ID height field when the drone sends one (height above
+  takeoff or ground). Otherwise geodetic altitude minus the detecting node's
+  ground, shown with `~`.
+
+The node's ground elevation comes from its GPS survey, so a node that hasn't
+got a fix yet can't produce estimates (the field shows `—`).
+
+## Advisory thresholds
+
+Settings → **Airspace (ADS-B)**, applied live with no redeploy:
+
+| Setting | Default | Range |
+|---|---|---|
+| Alert below (ft AGL) | 400 | 50 to 5000 |
+| Within radius of a node (km) | 8 | 0.5 to 50 |
+| Re-alert same aircraft after (s) | 120 | 10 to 3600 |
+
+Out-of-range values are clamped to the nearest bound.

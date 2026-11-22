@@ -314,6 +314,7 @@ sdrs:
   - enabled: ${SDR_STR}
     backend: rtlsdr
     device_index: 0
+    # serial: KESTREL       # set this once a second RTL-SDR (ADS-B) is attached; see docs/adsb.md
     bands: ["900", "1g2", "433"]
   - enabled: false
     backend: hackrf

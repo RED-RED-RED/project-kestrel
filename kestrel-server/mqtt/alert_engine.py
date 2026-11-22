@@ -27,6 +27,8 @@ from models.schemas import DetectionEvent, NodeHeartbeat
 from mqtt.ws_broadcaster import WSBroadcaster
 from mqtt.notifier import notifier
 from analysis import rid_identity
+from analysis.agl import resolve_aircraft_agl_ft, resolve_drone_agl
+from core import runtime_settings as rt
 
 log = logging.getLogger("alerts")
 
@@ -54,9 +56,6 @@ def _compass(lat1, lon1, lat2, lon2) -> str:
     return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][round(brg / 45) % 8]
 
 
-_FT_PER_M = 3.28084
-
-
 class AlertEngine:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -76,16 +75,28 @@ class AlertEngine:
         for k in stale:
             del self._dedup[k]
 
+    def _live(self, key: str, default):
+        """A GUI-edited runtime value if one is set, else this engine's Settings."""
+        override = rt.get_override(key)
+        if override is not None:
+            return override
+        return getattr(self.settings, key, default)
+
     async def evaluate(self, event: DetectionEvent):
         """Run all rules against a detection event."""
         self._cleanup_dedup()
         drone = event.drone
+        if drone.agl_src is None:
+            # Normally resolved at ingest; resolve here for any other caller.
+            drone.agl_m, drone.agl_src = resolve_drone_agl(
+                drone.height_agl, drone.alt_geo, event.node_position.alt
+            )
         alerts = []
 
         # ---- Rule 1: No Remote ID ----
         # Drone is broadcasting but has no operator ID
         if not drone.operator_id or not drone.operator_id.strip():
-            agl = drone.height_agl or 0.0
+            agl = drone.agl_m or 0.0
             if agl >= self.settings.alert_no_rid_min_alt_m:
                 alerts.append({
                     "level": "high",
@@ -120,7 +131,9 @@ class AlertEngine:
             })
 
         # ---- Rule 3: Above FAA 400ft limit without operator ID ----
-        alt_agl = drone.height_agl or drone.alt_baro or 0.0
+        # Resolved AGL only. Never fall back to barometric altitude: that is
+        # pressure altitude (roughly MSL), so a grounded drone would read high.
+        alt_agl = drone.agl_m or 0.0
         if alt_agl > FAA_MAX_ALT_M and not drone.operator_id:
             alerts.append({
                 "level": "medium",
@@ -137,14 +150,14 @@ class AlertEngine:
             })
 
         # ---- Rule 4: Coordinate sanity check (basic spoof detection) ----
-        if drone.lat == 0.0 and drone.lon == 0.0 and (drone.height_agl or 0) > 10:
+        if drone.lat == 0.0 and drone.lon == 0.0 and (drone.agl_m or 0) > 10:
             alerts.append({
                 "level": "high",
                 "category": "spoofed_position",
                 "title": f"Null island coordinates — {drone.id}",
                 "description": (
                     f"Drone {drone.id} reporting lat=0, lon=0 while airborne "
-                    f"({(drone.height_agl or 0):.0f}m AGL) — likely spoofed position."
+                    f"({(drone.agl_m or 0):.0f}m AGL) — likely spoofed position."
                 ),
                 "drone_id": drone.id,
                 "node_id": event.node_id,
@@ -300,23 +313,20 @@ class AlertEngine:
         reference.
         """
         self._cleanup_dedup()
-        s = self.settings
-        thr_ft = getattr(s, "alert_low_aircraft_agl_ft", 400.0)
-        radius_km = getattr(s, "alert_low_aircraft_radius_km", 8.0)
-        cooldown = getattr(s, "alert_low_aircraft_cooldown_s", 120.0)
-        node_alt_ft = (node_alt_m or 0.0) * _FT_PER_M
+        thr_ft    = self._live("alert_low_aircraft_agl_ft", 400.0)
+        radius_km = self._live("alert_low_aircraft_radius_km", 8.0)
+        cooldown  = self._live("alert_low_aircraft_cooldown_s", 120.0)
         now_ts = time.time()
 
         for ac in aircraft:
             if ac.get("on_ground"):
                 continue
-            alt_ft = ac.get("alt_geom")
-            if alt_ft is None:
-                alt_ft = ac.get("alt_baro")
-            if alt_ft is None or ac.get("lat") is None or ac.get("lon") is None:
+            if ac.get("lat") is None or ac.get("lon") is None:
                 continue
-            agl_ft = alt_ft - node_alt_ft
-            if agl_ft >= thr_ft:
+            agl_ft, _src = resolve_aircraft_agl_ft(
+                ac.get("alt_geom"), ac.get("alt_baro"), node_alt_m
+            )
+            if agl_ft is None or agl_ft >= thr_ft:
                 continue
             dist_km = _haversine_km(node_lat, node_lon, ac["lat"], ac["lon"])
             if dist_km > radius_km:

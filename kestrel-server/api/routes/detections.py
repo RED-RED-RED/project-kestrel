@@ -56,7 +56,7 @@ async def get_drone_history(
         rows = await conn.fetch("""
             SELECT detected_at, node_id, transport, band, rssi,
                    drone_lat AS lat, drone_lon AS lon,
-                   alt_baro, height_agl, speed_h, speed_v, heading, status
+                   alt_baro, height_agl, agl_m, agl_src, speed_h, speed_v, heading, status
             FROM detections
             WHERE drone_id = $1
               AND ($2::timestamptz IS NULL OR detected_at >= $2)
@@ -82,7 +82,7 @@ async def list_detections(
         rows = await conn.fetch("""
             SELECT id, detected_at, node_id, transport, band, rssi,
                    drone_id, drone_lat, drone_lon, alt_baro, height_agl,
-                   speed_h, heading, status, operator_id
+                   agl_m, agl_src, speed_h, heading, status, operator_id
             FROM detections
             WHERE ($1::text IS NULL OR node_id = $1)
               AND ($2::text IS NULL OR drone_id = $2)

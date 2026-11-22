@@ -44,3 +44,52 @@ def test_list_wins_over_legacy_block():
     radios = resolve_sdrs(cfg)
     assert len(radios) == 1
     assert radios[0]["backend"] == "hackrf"        # the list takes precedence
+
+
+# ── RTL-SDR selection by serial (stable across reboots) ─────────────────────
+
+def test_serial_passes_through_and_defaults_to_none():
+    cfg = NodeConfig()
+    cfg.sdrs = [
+        {"backend": "rtlsdr", "device_index": 0, "serial": "KESTREL", "bands": ["900"]},
+        {"backend": "rtlsdr", "device_index": 1},
+    ]
+    radios = resolve_sdrs(cfg)
+    assert radios[0]["serial"] == "KESTREL"
+    assert radios[1]["serial"] is None
+
+
+def _fake_rtlsdr(monkeypatch, serials):
+    """Install a stand-in pyrtlsdr module; returns the list of opened indexes."""
+    import sys, types
+    opened = []
+
+    class FakeRtl:
+        @staticmethod
+        def get_device_index_by_serial(serial):
+            if serial not in serials:
+                raise IOError("not found")
+            return serials.index(serial)
+
+        def __init__(self, index):
+            opened.append(index)
+
+    monkeypatch.setitem(sys.modules, "rtlsdr", types.SimpleNamespace(RtlSdr=FakeRtl))
+    return opened
+
+
+def test_rtlsdr_opens_by_serial(monkeypatch):
+    from scanner.sdr_source import make_source
+    opened = _fake_rtlsdr(monkeypatch, ["ADSB1090", "KESTREL"])
+    src = make_source("rtlsdr", device_index=0, serial="KESTREL")
+    src.open()
+    assert opened == [1]                          # resolved by serial, not index 0
+
+
+def test_rtlsdr_unknown_serial_is_a_clear_error(monkeypatch):
+    import pytest
+    from scanner.sdr_source import make_source, SDRSourceError
+    _fake_rtlsdr(monkeypatch, ["ADSB1090"])
+    src = make_source("rtlsdr", serial="KESTREL")
+    with pytest.raises(SDRSourceError, match="rtl_eeprom"):
+        src.open()

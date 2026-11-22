@@ -103,6 +103,8 @@ class WSBroadcaster:
                 "lat":       event.drone.lat,
                 "lon":       event.drone.lon,
                 "alt_baro":  event.drone.alt_baro,
+                "agl_m":     event.drone.agl_m,
+                "agl_src":   event.drone.agl_src,
                 "speed_h":   event.drone.speed_h,
                 "heading":   event.drone.heading,
                 "status":    event.drone.status,

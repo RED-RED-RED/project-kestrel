@@ -86,7 +86,7 @@ async def _build_live_state() -> dict:
         drone_rows = await conn.fetch(f"""
             SELECT drone_id, first_seen, last_seen,
                    last_node_id, last_transport, last_rssi,
-                   lat, lon, alt_baro, alt_geo, height_agl,
+                   lat, lon, alt_baro, alt_geo, height_agl, agl_m, agl_src,
                    speed_h, speed_v, heading, status,
                    id_type, ua_type, operator_id,
                    operator_lat, operator_lon, description,

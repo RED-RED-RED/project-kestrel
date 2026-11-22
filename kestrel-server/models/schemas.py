@@ -91,6 +91,8 @@ class DroneData(BaseModel):
     alt_baro: Optional[float] = None
     alt_geo: Optional[float] = None
     height_agl: Optional[float] = None
+    agl_m: Optional[float] = None          # resolved AGL, set server-side (analysis/agl.py)
+    agl_src: Optional[str] = None          # "rid" | "est"
     speed_h: Optional[float] = None
     speed_v: Optional[float] = None
     heading: Optional[float] = None
@@ -124,6 +126,8 @@ class DetectionOut(BaseModel):
     drone_lon: Optional[float] = None
     alt_baro: Optional[float] = None
     height_agl: Optional[float] = None
+    agl_m: Optional[float] = None
+    agl_src: Optional[str] = None
     speed_h: Optional[float] = None
     heading: Optional[float] = None
     status: Optional[str] = None
@@ -144,6 +148,8 @@ class DroneTrackOut(BaseModel):
     alt_baro: Optional[float] = None
     alt_geo: Optional[float] = None
     height_agl: Optional[float] = None
+    agl_m: Optional[float] = None
+    agl_src: Optional[str] = None
     speed_h: Optional[float] = None
     speed_v: Optional[float] = None
     heading: Optional[float] = None
