@@ -157,3 +157,24 @@ async def test_aircraft_alert_uses_live_override(_clean_overrides):
     rt._overrides["alert_low_aircraft_agl_ft"] = 1000.0
     await eng.evaluate_aircraft("KN-01", 41.54, -96.13, GROUND_M, [ac])
     assert len(emitted) == 1                  # GUI raised it to 1000, now alerts
+
+
+# ── Remote ID height reference (takeoff vs ground) ──────────────────────────
+
+def test_height_type_labels_source():
+    assert resolve_drone_agl(40.0, GROUND_M + 90, GROUND_M, "ground") == (40.0, "rid")
+    assert resolve_drone_agl(40.0, GROUND_M + 90, GROUND_M, "takeoff") == (40.0, "takeoff")
+    assert resolve_drone_agl(40.0, GROUND_M + 90, GROUND_M, None) == (40.0, "rid")   # older node
+
+
+def test_takeoff_height_still_beats_node_estimate():
+    # Measured on board, so preferred over a terrain-assuming estimate.
+    agl, src = resolve_drone_agl(40.0, GROUND_M + 90, GROUND_M, "takeoff")
+    assert (agl, src) == (40.0, "takeoff")
+
+
+def test_height_type_accepted_on_detection_payload():
+    ev = _event(height_agl=30.0, alt_baro=None, alt_geo=None)
+    payload = ev.model_dump()
+    payload["drone"]["height_type"] = "takeoff"
+    assert DetectionEvent(**payload).drone.height_type == "takeoff"

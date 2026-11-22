@@ -89,7 +89,8 @@ class AlertEngine:
         if drone.agl_src is None:
             # Normally resolved at ingest; resolve here for any other caller.
             drone.agl_m, drone.agl_src = resolve_drone_agl(
-                drone.height_agl, drone.alt_geo, event.node_position.alt
+                drone.height_agl, drone.alt_geo, event.node_position.alt,
+                drone.height_type,
             )
         alerts = []
 

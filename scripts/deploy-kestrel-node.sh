@@ -14,6 +14,11 @@
 #     --server-ip 192.168.1.100 \
 #     --mqtt-password your_password
 #
+# Optional radios (also offered as prompts in interactive mode):
+#   --enable-sdr      RTL-SDR sub-GHz band scan
+#   --enable-hackrf   HackRF One for 2.4 / 5.8 GHz (libhackrf + SoapySDR)
+#   --enable-adsb     dump1090-fa on a dedicated 1090 MHz RTL-SDR
+#
 # MQTT username is always "rid" — set by the KESTREL Server at deploy time.
 # ============================================================
 
@@ -36,7 +41,7 @@ LOG_DIR="/var/log/kestrel-node"
 # ── Argument parsing ─────────────────────────────────────────────────────
 UNATTENDED=false
 OPT_NODE_ID=""; OPT_SERVER_IP=""; OPT_MQTT_PASS=""
-OPT_WIFI_IFACE="wlan1"; OPT_WIFI_IFACE_5G=""; OPT_SDR=false; OPT_ADSB=false
+OPT_WIFI_IFACE="wlan1"; OPT_WIFI_IFACE_5G=""; OPT_SDR=false; OPT_ADSB=false; OPT_HACKRF=false
 OPT_REPO=""; OPT_GPS_MODE="usb"; OPT_MQTT_FALLBACK=""
 
 while [[ $# -gt 0 ]]; do
@@ -50,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --wifi-iface-5g)   OPT_WIFI_IFACE_5G="$2"; shift;;
     --enable-sdr)      OPT_SDR=true;;
     --enable-adsb)     OPT_ADSB=true;;
+    --enable-hackrf)   OPT_HACKRF=true;;
     --repo)            OPT_REPO="$2";          shift;;
     --gps-mode)        OPT_GPS_MODE="$2";      shift;;
     *) warn "Unknown argument: $1";;
@@ -120,6 +126,9 @@ if [[ "$UNATTENDED" == false ]]; then
   read -rp "  Enable RTL-SDR scanner? [y/N]: " SDR_RESP
   [[ "${SDR_RESP,,}" == "y" ]] && ENABLE_SDR=true || ENABLE_SDR=false
 
+  read -rp "  HackRF fitted (2.4 / 5.8 GHz)? [y/N]: " HACKRF_RESP
+  [[ "${HACKRF_RESP,,}" == "y" ]] && ENABLE_HACKRF=true || ENABLE_HACKRF=false
+
   read -rp "  GPS mode — usb (NEO-M9N) or uart (legacy NEO-M8N) [usb]: " GPS_MODE_RESP
   GPS_MODE="${GPS_MODE_RESP:-usb}"
 else
@@ -131,6 +140,7 @@ else
   WIFI_IFACE="$OPT_WIFI_IFACE"
   WIFI_IFACE_5G="$OPT_WIFI_IFACE_5G"
   ENABLE_SDR="$OPT_SDR"
+  ENABLE_HACKRF="$OPT_HACKRF"
   GPS_MODE="$OPT_GPS_MODE"
   [[ -n "$SERVER_IP" ]] || fail "--server-ip is required in unattended mode"
   [[ -n "$MQTT_PASS"  ]] || fail "--mqtt-password is required in unattended mode"
@@ -139,6 +149,9 @@ fi
 SDR_STR="false";   [[ "$ENABLE_SDR"    == true ]] && SDR_STR="true"
 ENABLE_ADSB="${OPT_ADSB:-false}"
 ADSB_STR="false";  [[ "$ENABLE_ADSB"   == true ]] && ADSB_STR="true"
+# --enable-hackrf wins over the interactive prompt
+[[ "$OPT_HACKRF" == true ]] && ENABLE_HACKRF=true
+HACKRF_STR="false"; [[ "${ENABLE_HACKRF:-false}" == true ]] && HACKRF_STR="true"
 WIFI_5G_STR="false"; [[ -n "$WIFI_IFACE_5G" ]] && WIFI_5G_STR="true"
 GPS_MODE="${GPS_MODE:-usb}"
 
@@ -148,6 +161,7 @@ info "Server     : ${BOLD}${SERVER_IP}${NC}"
 info "Wi-Fi 2.4G : ${WIFI_IFACE}"
 info "Wi-Fi 5G   : ${WIFI_IFACE_5G:-(not fitted)}"
 info "SDR        : ${SDR_STR}"
+info "HackRF     : ${HACKRF_STR}"
 info "ADS-B      : ${ADSB_STR}"
 info "GPS mode   : ${GPS_MODE}"
 echo ""
@@ -186,6 +200,29 @@ if [[ "$ADSB_STR" == "true" ]] && ! command -v dump1090-fa >/dev/null 2>&1; then
     warn "Could not add the FlightAware repo — install dump1090-fa manually (docs/adsb.md)"
   fi
   rm -rf "$_tmp"
+fi
+
+# HackRF One for the 2.4 / 5.8 GHz bands — only when enabled. The node drives it
+# through SoapySDR, so this needs libhackrf (+ the hackrf CLI tools for
+# hackrf_info) and SoapySDR's HackRF module and Python binding, all from Debian.
+# Best-effort: a failure warns and leaves the HackRF entry unable to open; the
+# rest of the node still runs.
+HACKRF_OK=false
+if [[ "$HACKRF_STR" == "true" ]]; then
+  step 1c "HackRF (libhackrf + SoapySDR)"
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       hackrf libhackrf0 soapysdr-tools soapysdr-module-hackrf python3-soapysdr \
+       >/dev/null 2>&1; then
+    ok "libhackrf + SoapySDR HackRF module installed"
+    HACKRF_OK=true
+    if hackrf_info 2>/dev/null | grep -q "Serial number"; then
+      ok "HackRF detected: $(hackrf_info 2>/dev/null | grep -m1 'Serial number' | awk '{print $NF}')"
+    else
+      warn "No HackRF detected right now (fine if it isn't plugged in yet)"
+    fi
+  else
+    warn "HackRF packages failed to install. Run: apt-get install hackrf libhackrf0 soapysdr-module-hackrf python3-soapysdr"
+  fi
 fi
 
 # ── 2/8  Hardware configuration ──────────────────────────────────────────
@@ -262,6 +299,26 @@ if ! "$INSTALL_DIR/venv/bin/python" -c "import rtlsdr" 2>/dev/null; then
 fi
 ok "RTL-SDR Python binding OK"
 
+# The venv is isolated from system packages, and SoapySDR's Python binding only
+# ships as an apt package. Link just that module into the venv (the same
+# python3 built both, so the compiled extension matches).
+if [[ "$HACKRF_OK" == true ]]; then
+  SOAPY_DIR="$(python3 -c 'import SoapySDR, os; print(os.path.dirname(SoapySDR.__file__))' 2>/dev/null || true)"
+  VENV_SITE="$("$INSTALL_DIR/venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+  if [[ -n "$SOAPY_DIR" ]]; then
+    ln -sf "$SOAPY_DIR/SoapySDR.py" "$VENV_SITE/SoapySDR.py"
+    for so in "$SOAPY_DIR"/_SoapySDR*.so; do
+      [[ -e "$so" ]] && ln -sf "$so" "$VENV_SITE/$(basename "$so")"
+    done
+  fi
+  if "$INSTALL_DIR/venv/bin/python" -c "import SoapySDR" 2>/dev/null; then
+    ok "SoapySDR Python binding OK (HackRF)"
+  else
+    warn "SoapySDR won't import in the venv, so HackRF scanning will be skipped."
+    warn "python3-soapysdr is built for the distro python3; the venv must use that same python3."
+  fi
+fi
+
 # ── 5/8  Configuration ────────────────────────────────────────────────────
 if [[ "$GPS_MODE" == "uart" ]]; then
   GPS_PORT="/dev/ttyAMA0"
@@ -308,15 +365,15 @@ bt:
   backend: auto             # direct HCI access to the dongle, bleak fallback
 
 # SDR radios — each entry is an independent receiver with its own sweep.
-# The RTL-SDR covers the sub-GHz control bands. Add a HackRF for 2.4/5.8 GHz
-# by flipping its enabled to true (band codes: 433, 900, 1g2, 2g4, 5g8).
+# The RTL-SDR covers the sub-GHz control bands; the HackRF covers 2.4/5.8 GHz
+# (set by --enable-hackrf). Band codes: 433, 900, 1g2, 2g4, 5g8.
 sdrs:
   - enabled: ${SDR_STR}
     backend: rtlsdr
     device_index: 0
     # serial: KESTREL       # set this once a second RTL-SDR (ADS-B) is attached; see docs/adsb.md
     bands: ["900", "1g2", "433"]
-  - enabled: false
+  - enabled: ${HACKRF_STR}
     backend: hackrf
     device_index: 0
     bands: ["2g4", "5g8"]

@@ -49,12 +49,12 @@ class TestBasicID:
 
 class TestLocation:
     def _make_location_frame(self, lat, lon, alt_baro=50.0, speed_h=5.0,
-                              heading=90, status=2):
+                              heading=90, status=2, height_ref=0):
         """Encode a Location message per ODID_Location_encoded (ASTM F3411)."""
         ew = 1 if heading >= 180 else 0
         frame = bytearray(25)
         frame[0] = (MsgType.LOCATION << 4) | 2
-        frame[1] = (status << 4) | (ew << 1)
+        frame[1] = (status << 4) | (height_ref << 2) | (ew << 1)
         frame[2] = int(heading - 180 * ew)
         frame[3] = int(speed_h / 0.25) & 0xFF
         frame[4] = 0
@@ -96,6 +96,29 @@ class TestLocation:
 
         frames = OpenDroneIDParser().parse(pack)
         assert frames and frames[0].alt_baro == 0.0
+
+    def _parse_one(self, loc):
+        basic = (bytes([0x00, 0x12]) + b"HEIGHTREF\x00" * 3)[:25]
+        pack = bytes([(MsgType.MESSAGE_PACK << 4), 0x19, 2]) + basic + loc
+        frames = OpenDroneIDParser().parse(pack)
+        assert frames
+        return frames[0]
+
+    def test_height_type_takeoff(self):
+        f = self._parse_one(self._make_location_frame(lat=41.5, lon=-96.1, height_ref=0))
+        assert f.height_type == "takeoff"
+
+    def test_height_type_ground(self):
+        f = self._parse_one(self._make_location_frame(lat=41.5, lon=-96.1, height_ref=1))
+        assert f.height_type == "ground"
+
+    def test_height_type_bit_does_not_disturb_neighbours(self):
+        # Bit 2 sits between status (7-4) and the E/W direction bit (1)
+        f = self._parse_one(self._make_location_frame(lat=41.5, lon=-96.1, heading=270,
+                                                      status=2, height_ref=1))
+        assert f.height_type == "ground"
+        assert f.heading == pytest.approx(270, abs=1)
+        assert f.status == "airborne"
 
     def test_heading_west_half(self):
         data = self._make_location_frame(lat=40.0, lon=-100.0, heading=270)

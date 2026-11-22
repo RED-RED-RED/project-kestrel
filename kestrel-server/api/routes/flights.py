@@ -28,7 +28,7 @@ _RANGES = {"1h": "1 hour", "6h": "6 hours", "24h": "24 hours",
 _DET_COLS = """
     detected_at AS t, node_id, rssi, drone_id,
     drone_lat AS lat, drone_lon AS lon,
-    alt_geo, alt_baro, height_agl, agl_m, speed_h, heading,
+    alt_geo, alt_baro, height_agl, height_type, agl_m, speed_h, heading,
     operator_id, operator_lat, operator_lon, ua_type, description,
     node_lat, node_lon, node_alt
 """

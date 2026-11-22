@@ -104,7 +104,8 @@ class RIDFrame:
     lon: float = 0.0
     alt_baro: float = 0.0           # Barometric altitude, meters
     alt_geo: float = 0.0            # Geodetic (GPS) altitude, meters
-    height_agl: float = 0.0         # Height above ground, meters
+    height_agl: float = 0.0         # Height field, meters (reference in height_type)
+    height_type: str = ""           # "takeoff" | "ground" (Location HeightType bit); "" = no Location yet
     speed_h: float = 0.0            # Horizontal speed m/s
     speed_v: float = 0.0            # Vertical speed m/s
     heading: float = 0.0            # Degrees true north
@@ -306,6 +307,7 @@ class OpenDroneIDParser:
         Invalid markers (direction 361, speed 255 / 63, altitude -1000) map to 0.0.
         """
         status_raw = (data[1] >> 4) & 0x0F
+        height_ref = (data[1] >> 2) & 0x01   # 0 = above takeoff, 1 = above ground
         ew_dir     = (data[1] >> 1) & 0x01
         speed_mult = data[1] & 0x01
 
@@ -336,6 +338,7 @@ class OpenDroneIDParser:
         frame.alt_baro   = self._decode_alt(struct.unpack_from("<H", data, 13)[0])
         frame.alt_geo    = self._decode_alt(struct.unpack_from("<H", data, 15)[0])
         frame.height_agl = self._decode_alt(struct.unpack_from("<H", data, 17)[0])
+        frame.height_type = "ground" if height_ref else "takeoff"
 
     def _parse_self_id(self, frame: RIDFrame, data: bytes):
         """

@@ -174,7 +174,7 @@ async def _create_schema(pool: Pool):
             ON detections (node_id, detected_at DESC);
         """)
         # Resolved height above ground (analysis/agl.py), added post-launch
-        for col, dtype in [("agl_m", "REAL"), ("agl_src", "TEXT")]:
+        for col, dtype in [("agl_m", "REAL"), ("agl_src", "TEXT"), ("height_type", "TEXT")]:
             try:
                 await conn.execute(
                     f"ALTER TABLE detections ADD COLUMN IF NOT EXISTS {col} {dtype};"
@@ -250,6 +250,7 @@ async def _create_schema(pool: Pool):
             # Resolved height above ground (analysis/agl.py)
             ("agl_m",               "REAL"),
             ("agl_src",             "TEXT"),
+            ("height_type",         "TEXT"),
         ]:
             try:
                 await conn.execute(

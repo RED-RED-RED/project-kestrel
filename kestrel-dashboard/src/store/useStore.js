@@ -433,6 +433,14 @@ export function fmtClimb(ms, imperial) {
                            : `${Math.abs(ms).toFixed(1)} m/s`)
 }
 
+// Where an AGL figure came from, for tooltips and popups ('' = drone's own
+// ground-referenced height, nothing to qualify).
+export function aglNote(d) {
+  if (d?.agl_src === 'takeoff') return 'height above takeoff point'
+  if (d?.agl_src === 'est')     return "estimated from the node's ground elevation"
+  return ''
+}
+
 export function fmtSpeed(ms, imperial) {
   if (ms == null) return '—'
   if (imperial) return `${(ms * 2.23694).toFixed(1)} mph`

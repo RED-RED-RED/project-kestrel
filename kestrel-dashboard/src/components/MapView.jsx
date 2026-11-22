@@ -3,7 +3,7 @@ import { useEffect, useRef, useMemo } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useStore, selectActiveDrones, selectAllNodes, selectRfContacts, selectAircraft, isStale,
-         RF_SIGNAL_LABELS, RF_BAND_LABELS, useUnits, fmtAgl, fmtSpeed, fmtDist,
+         RF_SIGNAL_LABELS, RF_BAND_LABELS, useUnits, fmtAgl, aglNote, fmtSpeed, fmtDist,
          fmtAltFt, fmtSpeedKt } from '../store/useStore'
 import { colors } from '../theme/colors'
 
@@ -270,8 +270,8 @@ function dronePopupHtml(drone, imperial = false) {
     <div>${rid}</div>
     <div style="color:${colors.textMuted}">${drone.ua_type || 'Unknown type'}</div>
     <hr style="border-color:${colors.bgBorder};margin:5px 0"/>
-    <div><span style="color:${colors.textMuted}">AGL  </span>${fmtAgl(drone, imperial)}${drone.agl_src === 'est'
-      ? `<span style="color:${colors.textMuted};font-size:9px;"> est. from node ground</span>` : ''}</div>
+    <div><span style="color:${colors.textMuted}">AGL  </span>${fmtAgl(drone, imperial)}${aglNote(drone)
+      ? `<span style="color:${colors.textMuted};font-size:9px;"> ${drone.agl_src === 'takeoff' ? 'above takeoff' : 'est. from node ground'}</span>` : ''}</div>
     <div><span style="color:${colors.textMuted}">SPD  </span>${fmtSpeed(drone.speed_h, imperial)}</div>
     <div><span style="color:${colors.textMuted}">HDG  </span>${drone.heading?.toFixed(0)??'—'}°</div>
     <div><span style="color:${colors.textMuted}">OP   </span><span style="color:${colors.textPrimary}">${drone.operator_id||'—'}</span></div>

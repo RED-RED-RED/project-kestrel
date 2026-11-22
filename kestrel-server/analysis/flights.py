@@ -113,7 +113,8 @@ def _agl(r: dict):
     """Stored AGL, or resolved now for rows recorded before agl_m existed."""
     if r.get("agl_m") is not None:
         return r["agl_m"]
-    return resolve_drone_agl(r.get("height_agl"), r.get("alt_geo"), r.get("node_alt"))[0]
+    return resolve_drone_agl(r.get("height_agl"), r.get("alt_geo"), r.get("node_alt"),
+                             r.get("height_type"))[0]
 
 
 def detail(session: list[dict], threat: dict | None = None) -> dict:

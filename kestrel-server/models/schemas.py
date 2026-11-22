@@ -91,6 +91,7 @@ class DroneData(BaseModel):
     alt_baro: Optional[float] = None
     alt_geo: Optional[float] = None
     height_agl: Optional[float] = None
+    height_type: Optional[str] = None      # "takeoff" | "ground" (RID HeightType); None from older nodes
     agl_m: Optional[float] = None          # resolved AGL, set server-side (analysis/agl.py)
     agl_src: Optional[str] = None          # "rid" | "est"
     speed_h: Optional[float] = None

@@ -1,0 +1,15 @@
+# Line endings: LF in the repo and in every checkout, on every OS.
+# Everything here runs on Linux (Pi nodes, server containers), where CRLF
+# breaks shell scripts and shebangs. Editors on Windows handle LF fine.
+* text=auto eol=lf
+
+# Binary assets: never touch.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.bin  binary
+*.uf2  binary

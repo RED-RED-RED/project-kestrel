@@ -93,9 +93,11 @@ Every altitude in the dashboard is height above ground (AGL).
   `baro` (rougher: uncorrected for local pressure). Shown as `~` because it
   assumes the ground under the aircraft matches the node's; that holds near
   the node, which is where the advisory looks.
-- **Drones:** the Remote ID height field when the drone sends one (height above
-  takeoff or ground). Otherwise geodetic altitude minus the detecting node's
-  ground, shown with `~`.
+- **Drones:** the Remote ID height field when the drone sends one. Remote ID
+  says whether that height is above the ground or above the takeoff point;
+  takeoff-referenced heights are labeled "above takeoff" in the map popup and
+  contact tooltip (they read low after a roof launch). With no height field,
+  geodetic altitude minus the detecting node's ground, shown with `~`.
 
 The node's ground elevation comes from its GPS survey, so a node that hasn't
 got a fix yet can't produce estimates (the field shows `—`).

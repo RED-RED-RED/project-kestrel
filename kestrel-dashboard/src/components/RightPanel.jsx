@@ -1,5 +1,5 @@
 // src/components/RightPanel.jsx
-import { useStore, selectActiveDrones, selectOpenAlerts, threatColor, threatLabel, useUnits, fmtAgl, fmtClimb, fmtSpeed, fmtDist, selectHighAlerts } from '../store/useStore'
+import { useStore, selectActiveDrones, selectOpenAlerts, threatColor, threatLabel, useUnits, fmtAgl, aglNote, fmtClimb, fmtSpeed, fmtDist, selectHighAlerts } from '../store/useStore'
 import { formatDistanceToNow } from 'date-fns'
 
 const css = `
@@ -408,7 +408,7 @@ function DroneDetail({ drone }) {
         <div className="detail-cell">
           <div className="dc-label">Height AGL</div>
           <div className="dc-val amber"
-               title={drone.agl_src === 'est' ? 'Estimated from the detecting node\'s ground elevation' : undefined}>
+               title={aglNote(drone) || undefined}>
             {fmtAgl(drone, imperial)}
           </div>
         </div>

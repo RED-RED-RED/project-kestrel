@@ -170,6 +170,7 @@ class MQTTPublisher:
                 "alt_baro":     frame.alt_baro,
                 "alt_geo":      frame.alt_geo,
                 "height_agl":   frame.height_agl,
+                "height_type":  frame.height_type or None,
                 "speed_h":      frame.speed_h,
                 "speed_v":      frame.speed_v,
                 "heading":      frame.heading,

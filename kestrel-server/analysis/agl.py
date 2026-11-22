@@ -32,16 +32,25 @@ def resolve_drone_agl(
     height_agl: Optional[float],
     alt_geo: Optional[float],
     ground_alt_m: Optional[float],
+    height_type: Optional[str] = None,
 ) -> tuple[Optional[float], Optional[str]]:
     """
     Best AGL for a Remote ID drone, in metres, plus where it came from.
 
-      "rid" -> the drone's own height field (above takeoff or ground).
-      "est" -> geodetic altitude minus the detecting node's ground elevation.
+      "rid"     -> the drone's own height, referenced to the ground (or a node
+                   too old to report the reference).
+      "takeoff" -> the drone's own height, referenced to its takeoff point.
+                   Equals AGL when it launched from local ground level. Reads
+                   low after a roof or hilltop launch, high over terrain that
+                   rises above the launch point.
+      "est"     -> geodetic altitude minus the detecting node's ground elevation.
       (None, None) -> nothing usable.
+
+    The drone's own height (either reference) beats the estimate: it's measured
+    on board and doesn't assume the terrain under the drone matches the node's.
     """
     if _valid(height_agl):
-        return round(float(height_agl), 1), "rid"
+        return round(float(height_agl), 1), ("takeoff" if height_type == "takeoff" else "rid")
     if _valid(alt_geo) and _valid(ground_alt_m):
         return round(max(float(alt_geo) - float(ground_alt_m), 0.0), 1), "est"
     return None, None

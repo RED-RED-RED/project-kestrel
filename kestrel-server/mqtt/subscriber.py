@@ -154,7 +154,8 @@ class MQTTSubscriber:
         # Resolve height above ground once, so storage, alerts, scoring and the
         # live feed all use the same number.
         event.drone.agl_m, event.drone.agl_src = resolve_drone_agl(
-            event.drone.height_agl, event.drone.alt_geo, event.node_position.alt
+            event.drone.height_agl, event.drone.alt_geo, event.node_position.alt,
+            event.drone.height_type,
         )
 
         pool = await get_pool()
@@ -170,7 +171,7 @@ class MQTTSubscriber:
                         id_type, ua_type, operator_id,
                         operator_lat, operator_lon, description,
                         node_lat, node_lon, node_alt,
-                        agl_m, agl_src
+                        agl_m, agl_src, height_type
                     ) VALUES (
                         to_timestamp($1), $2, $3, $4, $5,
                         $6, $7, $8,
@@ -179,7 +180,7 @@ class MQTTSubscriber:
                         $16, $17, $18,
                         $19, $20, $21,
                         $22, $23, $24,
-                        $25, $26
+                        $25, $26, $27
                     )
                 """,
                     event.ts, event.node_id, event.transport,
@@ -193,7 +194,7 @@ class MQTTSubscriber:
                     event.drone.description,
                     event.node_position.lat, event.node_position.lon,
                     event.node_position.alt,
-                    event.drone.agl_m, event.drone.agl_src,
+                    event.drone.agl_m, event.drone.agl_src, event.drone.height_type,
                 )
 
                 # 2. Upsert drone_tracks (live state — one row per drone)
@@ -214,7 +215,7 @@ class MQTTSubscriber:
                         operator_lat, operator_lon, description,
                         has_valid_rid, detection_count, detecting_nodes,
                         make, model, mfr_code, id_source,
-                        agl_m, agl_src
+                        agl_m, agl_src, height_type
                     ) VALUES (
                         $1, to_timestamp($2), to_timestamp($2),
                         $3, $4, $5,
@@ -224,7 +225,7 @@ class MQTTSubscriber:
                         $18, $19, $20,
                         $21, 1, ARRAY[$3],
                         $22, $23, $24, $25,
-                        $26, $27
+                        $26, $27, $28
                     )
                     ON CONFLICT (drone_id) DO UPDATE SET
                         last_seen       = to_timestamp($2),
@@ -259,8 +260,9 @@ class MQTTSubscriber:
                         model     = COALESCE($23, drone_tracks.model),
                         mfr_code  = COALESCE($24, drone_tracks.mfr_code),
                         id_source = $25,
-                        agl_m     = $26,
-                        agl_src   = $27
+                        agl_m       = $26,
+                        agl_src     = $27,
+                        height_type = $28
                 """,
                     event.drone.id, event.ts,
                     event.node_id, event.transport, event.rssi,
@@ -273,7 +275,7 @@ class MQTTSubscriber:
                     event.drone.description,
                     has_valid_rid,
                     ident["make"], ident["model"], ident["mfr_code"], ident["id_source"],
-                    event.drone.agl_m, event.drone.agl_src,
+                    event.drone.agl_m, event.drone.agl_src, event.drone.height_type,
                 )
 
         # 3. Run alert engine (outside transaction — non-critical)
