@@ -1,4 +1,4 @@
-# KESTREL
+# KESTREL AIRSPACE
 
 > Open-source airspace awareness platform. Distributed KESTREL nodes (KN-xx) passively detect FAA Remote ID broadcasts over Wi-Fi NAN and Bluetooth 5 LR, feeding a central server that correlates detections across nodes, identifies drone make and model from FAA Declaration of Compliance records, scores threats, and verifies positions via MLAT trilateration.
 >
