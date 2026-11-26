@@ -139,6 +139,9 @@ def test_nodes_group_in_settings_snapshot():
     snap = rt.snapshot()
     nodes = [e for e in snap["editable"] if e["group"] == "Nodes"]
     keys = [e["key"] for e in nodes]
-    assert keys == ["alert_node_offline_enabled", "node_offline_after_s"]
-    assert nodes[0]["type"] == "bool" and nodes[0]["value"] is True
-    assert nodes[1]["value"] == 300 and nodes[1]["min"] == 300
+    assert keys == ["alert_node_offline_enabled", "alert_radio_down_enabled",
+                    "radio_down_after_s", "node_offline_after_s"]
+    by = {e["key"]: e for e in nodes}
+    assert by["alert_node_offline_enabled"]["type"] == "bool"
+    assert by["alert_node_offline_enabled"]["value"] is True
+    assert by["node_offline_after_s"]["value"] == 300 and by["node_offline_after_s"]["min"] == 300

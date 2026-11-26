@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     alert_low_aircraft_cooldown_s: float = 120.0  # Re-alert interval for a loitering low aircraft
     node_offline_after_s: int = 300            # No heartbeat this long -> offline (min 5 min; nodes beat every ~10 s)
     alert_node_offline_enabled: bool = True    # Raise an alert (and push) when a node goes offline
+    alert_radio_down_enabled: bool = True      # Alert when one radio on an online node stays down
+    radio_down_after_s: int = 120              # ...for this long (min 60)
 
     # RF contacts (SDR-classified links)
     rf_correlation_window_s: int = 20          # RID track must be this fresh to correlate

@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { colors } from '../theme/colors'
 import SettingsPanel from './SettingsPanel'
+import { useStore } from '../store/useStore'
+import { RadioTable, radioSummary, radioCss } from './RadioStatus'
 
 const SERVER_ID = '__server__'
 const RANGES = ['1h', '6h', '24h', '7d']
@@ -113,6 +115,8 @@ export default function SystemView() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const timer = useRef(null)
+  const liveNodes = useStore(s => s.nodes)
+  const [radiosOpen, setRadiosOpen] = useState({})      // node_id -> bool (default open)
 
   useEffect(() => {
     let alive = true
@@ -152,7 +156,7 @@ export default function SystemView() {
 
   return (
     <div className="sv-root">
-      <style>{css}</style>
+      <style>{css + radioCss}</style>
 
       <div className="sv-head">
         <div className="sv-tabs">
@@ -204,6 +208,23 @@ export default function SystemView() {
                   </span>
                 )}
               </div>
+              {!isServer && (() => {
+                const node = liveNodes[n]
+                const sum = radioSummary(node)
+                const open = radiosOpen[n] ?? true
+                if (!node) return null
+                if (!sum) return <RadioTable node={node} />
+                return (<>
+                  <button className="rs-toggle" aria-expanded={open}
+                          onClick={() => setRadiosOpen(o => ({ ...o, [n]: !open }))}>
+                    <span>{open ? '▾' : '▸'} Radios</span>
+                    <span style={{ color: sum.bad ? colors.threatHigh : sum.warn ? colors.threatMed : colors.threatLow }}>
+                      {sum.ok}/{sum.total} running{sum.warn ? ` · ${sum.warn} degraded` : ''}{sum.bad ? ` · ${sum.bad} down` : ''}
+                    </span>
+                  </button>
+                  {open && <RadioTable node={node} />}
+                </>)
+              })()}
             </div>
           )
         })}
@@ -275,7 +296,7 @@ const css = `
 .sv-err { color:var(--threat-high); font-size:12px; margin-bottom:10px; }
 .sv-empty { color:var(--muted); font-size:12px; padding:12px; }
 
-.sv-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; margin-bottom:16px; }
+.sv-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; margin-bottom:16px; align-items:start; }
 .sv-card { background:var(--bg1); border:1px solid var(--bg-border); border-radius:3px; padding:10px 12px; }
 .sv-card-head { display:flex; align-items:center; gap:7px; margin-bottom:8px; }
 .sv-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }

@@ -1,6 +1,7 @@
 // src/components/Sidebar.jsx
 import { useStore, selectAllNodes, selectActiveDrones, selectOpenAlerts, useUnits } from '../store/useStore'
 import Icon from './Icons'
+import { RadioChips, radioCss } from './RadioStatus'
 
 const css = `
 .sidebar {
@@ -193,7 +194,7 @@ export default function Sidebar() {
 
   return (
     <>
-      <style>{css}</style>
+      <style>{css + radioCss}</style>
       <aside className="sidebar">
         {/* Navigation */}
         <nav className="sb-nav">
@@ -231,7 +232,6 @@ export default function Sidebar() {
             const st = node.status === 'online' ? 'nd-online'
                      : node.status === 'warn'   ? 'nd-warn'
                                                 : 'nd-offline'
-            const radios = node.radios?.length ? node.radios : ['wifi','bt']
             const detections = drones.filter(d =>
               d.detecting_nodes?.includes(node.node_id)).length
 
@@ -252,11 +252,7 @@ export default function Sidebar() {
                   </span>
                   <span>{node.gps_fix ? '⌖ GPS' : '⌖ NO FIX'}</span>
                 </div>
-                <div className="sb-node-radios">
-                  {radios.includes('wifi') && <span className="sb-radio r-wifi">WiFi</span>}
-                  {radios.includes('bt')   && <span className="sb-radio r-bt">BT5</span>}
-                  {radios.includes('sdr')  && <span className="sb-radio r-sdr">SDR</span>}
-                </div>
+                <RadioChips node={node} />
               </div>
             )
           })}

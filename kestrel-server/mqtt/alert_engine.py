@@ -238,7 +238,9 @@ class AlertEngine:
         a 60 second suppression window.
         """
         self._cleanup_dedup()
-        if not hb.jamming_state or hb.jamming_state == "ok":
+        # Only real indications. "unknown" means the receiver hasn't assessed
+        # jamming yet (or can't), which isn't a reason to page anyone.
+        if hb.jamming_state not in ("warning", "critical"):
             return
 
         key = ("gps_jamming", None, hb.node_id)
@@ -374,6 +376,25 @@ class AlertEngine:
             "node_id": node_id,
             "lat": None,
             "lon": None,
+        })
+
+    async def radio_down(self, node_id: str, radio: dict, lat=None, lon=None):
+        """One radio on an online node has stayed down (core/radio_watch.py)."""
+        if not self._live("alert_radio_down_enabled", True):
+            return
+        label = radio.get("label") or radio.get("id", "radio")
+        reason = radio.get("error") or "reported down"
+        await self._emit({
+            "level": "medium",
+            "category": "radio_down",
+            "title": f"{label} down on {node_id}",
+            "description": f"{label} on {node_id}: {reason}. The node is still online; "
+                           f"this band isn't being covered.",
+            "drone_id": None,
+            "node_id": node_id,
+            "lat": lat,
+            "lon": lon,
+            "ref_id": f"radio:{node_id}:{radio.get('id')}",
         })
 
     async def _emit(self, alert: dict):

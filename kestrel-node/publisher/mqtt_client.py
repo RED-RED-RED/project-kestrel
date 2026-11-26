@@ -184,7 +184,8 @@ class MQTTPublisher:
         topic = f"kestrel/{node_id}/detection"
         self._enqueue(topic, payload, qos=1)
 
-    def send_heartbeat(self, gps, radios: list[str] | None = None):
+    def send_heartbeat(self, gps, radios: list[str] | None = None,
+                       radio_status: list[dict] | None = None):
         """Publish node health metrics. Called every N seconds by the main loop."""
         import psutil
         payload = {
@@ -207,6 +208,10 @@ class MQTTPublisher:
             },
             "radios": radios or [],
         }
+        if radio_status is not None:
+            # Live per-radio health (scanner/health.py). `radios` stays for
+            # servers that predate this field.
+            payload["radio_status"] = radio_status
         topic = f"kestrel/{self.node_id}/heartbeat"
         self._enqueue(topic, payload, qos=0)
 
@@ -251,7 +256,7 @@ class MQTTPublisher:
     # ------------------------------------------------------------------ #
 
     def _enqueue(self, topic: str, payload: dict, qos: int = 1):
-        msg = (topic, json.dumps(payload), qos)
+        msg = (topic, json.dumps(payload, separators=(",", ":")), qos)   # compact: no spaces
         try:
             self._q.put_nowait(msg)
         except queue.Full:

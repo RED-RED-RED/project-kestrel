@@ -420,6 +420,9 @@ class GPSDaemon:
         # Set once UBX-NAV-PVT arrives; from then on it is the altitude
         # authority and NMEA only fills in when it can also give HAE.
         self._pvt_seen:       bool           = False
+        # Serial link state, for the heartbeat's radio status
+        self._port_open:      bool           = False
+        self._port_error:     Optional[str]  = None
 
     # ── Thread-safe properties ─────────────────────────────────────────────
 
@@ -466,6 +469,35 @@ class GPSDaemon:
     def wait_for_fix(self, timeout: float = 60) -> bool:
         return self._fix_event.wait(timeout=timeout)
 
+    def radio_status(self) -> dict:
+        """GPS entry for the heartbeat's per-radio status."""
+        with self._lock:
+            has_fix, sats = self._has_fix, self._satellites
+            jam, spoof = self._jamming_state, self._spoofing_state
+        detail = {
+            "port": self._active_port,
+            "sats": sats,
+            "fix": has_fix,
+            "ublox": self._is_ublox,
+        }
+        if self._is_ublox:
+            detail.update(jamming=jam, spoofing=spoof, survey=self._survey_complete)
+        if not self._port_open:
+            state, err = "down", self._port_error or "GPS serial port not open"
+        elif spoof in ("spoofing", "multiple"):
+            state, err = "degraded", f"spoofing indicated ({spoof})"
+        elif jam in ("warning", "critical"):
+            state, err = "degraded", f"jamming {jam}"
+        elif not has_fix:
+            state, err = "degraded", "no fix"
+        else:
+            state, err = "running", None
+        out = {"id": "gps", "kind": "gps", "label": "GPS", "state": state,
+               "detail": {k: v for k, v in detail.items() if v is not None}}
+        if err:
+            out["error"] = err
+        return out
+
     def heartbeat_extras(self) -> dict:
         """Extra fields to merge into the MQTT heartbeat payload."""
         return {
@@ -503,6 +535,7 @@ class GPSDaemon:
 
                 with serial.Serial(active_port, self.baud, timeout=1) as ser:
                     log.info(f"GPS serial opened: {active_port} ({active_mode})")
+                    self._port_open, self._port_error = True, None
                     if self._is_ublox:
                         self._init_ublox(ser)
 
@@ -536,13 +569,16 @@ class GPSDaemon:
 
                         except serial.SerialException as e:
                             log.warning(f"GPS read error: {e}")
+                            self._port_open, self._port_error = False, f"read error: {e}"
                             break
 
             except RuntimeError as e:
                 log.error(f"GPS port detection failed: {e} — retrying in 30 s")
+                self._port_open, self._port_error = False, f"no GPS found: {e}"
                 time.sleep(30)
             except serial.SerialException as e:
                 log.error(f"GPS port error: {e} — retrying in 10 s")
+                self._port_open, self._port_error = False, f"port error: {e}"
                 time.sleep(10)
 
         log.info("GPS daemon stopped.")

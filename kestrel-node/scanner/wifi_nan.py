@@ -44,6 +44,7 @@ from scapy.all import sniff, RadioTap, Dot11, Dot11Elt, Raw
 
 from parser.opendroneid import OpenDroneIDParser, RIDFrame
 from publisher.mqtt_client import MQTTPublisher
+from scanner.health import RadioHealth, DOWN, flag_quiet as _flag_quiet
 from publisher.gps import GPSDaemon
 
 log = logging.getLogger("wifi-nan")
@@ -119,6 +120,10 @@ class WiFiNANScanner:
             self.channels = _CHANNELS_2G
 
         self._label = f"WiFi NAN {self.band}GHz"
+        self.health = RadioHealth(
+            "wifi_5g" if band == "5" else "wifi_2g", "wifi",
+            f"Wi-Fi {self.band} GHz", iface=iface, channels=list(self.channels),
+        )
         self._parser = OpenDroneIDParser()
         self._seen: dict[str, float] = {}   # dedup: drone_id → last_seen timestamp
         self._dedup_window = 2.0            # seconds
@@ -139,15 +144,19 @@ class WiFiNANScanner:
                 f"[{self._label}] Interface {self.iface} not found — "
                 "skipping scanner. Single-adapter deployments are unaffected."
             )
+            self.health.down(f"interface {self.iface} not found")
             return
 
         log.info(f"[{self._label}] Scanner starting on {self.iface} "
                  f"(channels={self.channels}, dwell={self.dwell_ms}ms)")
         hop_thread = threading.Thread(target=self._channel_hopper, daemon=True)
         hop_thread.start()
+        self.health.running()
 
         while not self.stop_event.is_set():
             try:
+                if self.health.state == DOWN:
+                    self.health.running()
                 sniff(
                     iface=self.iface,
                     prn=self._handle_packet,
@@ -157,9 +166,17 @@ class WiFiNANScanner:
                 )
             except OSError as e:
                 log.error(f"[{self._label}] Sniff error on {self.iface}: {e} — retrying in 5 s")
+                self.health.down(f"capture error on {self.iface}: {e}")
                 time.sleep(5)
 
         log.info(f"[{self._label}] Scanner stopped.")
+
+    def status(self) -> dict:
+        """Live health snapshot for the heartbeat."""
+        snap = self.health.snapshot({
+            "frames_per_min": "frames", "rid_10m": "rid", "hop_errors_per_min": "hop_errors",
+        })
+        return _flag_quiet(snap, "frames_per_min", "no frames received in the last minute")
 
     # ------------------------------------------------------------------ #
     # Internal
@@ -174,6 +191,7 @@ class WiFiNANScanner:
         )
 
     def _handle_packet(self, pkt):
+        self.health.count("frames")
         try:
             if pkt.haslayer(Dot11) and pkt[Dot11].subtype == 8:
                 self._process_beacon(pkt)
@@ -211,6 +229,7 @@ class WiFiNANScanner:
                 f"rssi={rssi} dBm  {frame.lat:.5f},{frame.lon:.5f}"
             )
 
+            self.health.count("rid")
             self.publisher.publish_detection(
                 node_id=self.node_id,
                 transport="wifi_nan",
@@ -291,6 +310,7 @@ class WiFiNANScanner:
                 f"rssi={rssi} dBm  {frame.lat:.5f},{frame.lon:.5f}"
             )
 
+            self.health.count("rid")
             self.publisher.publish_detection(
                 node_id=self.node_id,
                 transport="wifi_beacon",
@@ -357,12 +377,14 @@ class WiFiNANScanner:
         while not self.stop_event.is_set():
             ch = self.channels[idx % len(self.channels)]
             try:
-                subprocess.run(
+                r = subprocess.run(
                     ["iw", "dev", self.iface, "set", "channel", str(ch)],
                     capture_output=True,
                     timeout=2,
                 )
+                if r.returncode != 0:
+                    self.health.count("hop_errors")
             except Exception:
-                pass
+                self.health.count("hop_errors")
             idx += 1
             time.sleep(dwell_s)

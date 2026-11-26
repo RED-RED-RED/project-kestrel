@@ -13,6 +13,7 @@ independent timing without blocking the MQTT subscriber.
 """
 
 import asyncio
+import json
 import logging
 import time
 
@@ -102,7 +103,8 @@ async def _build_live_state() -> dict:
         node_rows = await conn.fetch("""
             SELECT node_id, site_name, status, last_seen,
                    lat, lon, alt, gps_fix, satellites,
-                   cpu_pct, mem_pct, disk_pct, temp_c, uptime_s, radios
+                   cpu_pct, mem_pct, disk_pct, temp_c, uptime_s, radios,
+                   radio_status, radio_status_at
             FROM nodes
             ORDER BY node_id
         """)
@@ -156,6 +158,12 @@ async def _build_live_state() -> dict:
 
 def _row_to_dict(row) -> dict:
     d = dict(row)
+    # asyncpg hands JSONB back as text (no codec registered)
+    if isinstance(d.get("radio_status"), str):
+        try:
+            d["radio_status"] = json.loads(d["radio_status"])
+        except ValueError:
+            d["radio_status"] = None
     # Serialize datetimes to ISO strings
     for k, v in d.items():
         if hasattr(v, "isoformat"):

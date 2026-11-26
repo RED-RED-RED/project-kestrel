@@ -46,6 +46,9 @@ EDITABLE: dict[str, dict] = {
     "rid_doc_source_url":      {"type": "str",   "group": "Remote ID", "label": "FAA DoC source URL"},
     # Node health — live-editable
     "alert_node_offline_enabled": {"type": "bool", "group": "Nodes", "label": "Alert when a node goes offline"},
+    "alert_radio_down_enabled": {"type": "bool", "group": "Nodes", "label": "Alert when a node's radio goes down"},
+    "radio_down_after_s":       {"type": "int",  "group": "Nodes", "label": "Radio down for at least (s, min 60)",
+                                 "min": 60, "max": 3600},
     "node_offline_after_s":    {"type": "int",   "group": "Nodes", "label": "Mark offline after no heartbeat (s, min 300)",
                                 "min": 300, "max": 86400},
     # Low-aircraft deconfliction advisory (ADS-B) — live-editable

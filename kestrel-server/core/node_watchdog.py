@@ -21,6 +21,7 @@ import asyncio
 import logging
 
 from core import runtime_settings as rt
+from core.radio_watch import radio_watch
 from db.database import get_pool
 
 log = logging.getLogger("node-watchdog")
@@ -47,6 +48,7 @@ async def sweep_once(alert_engine, broadcaster, timeout_s: float) -> list[str]:
         node_id, silent_s = r["node_id"], r["silent_s"] or 0
         mins = max(1, round(silent_s / 60))
         log.warning(f"Node {node_id} marked offline: no heartbeat for {silent_s}s")
+        radio_watch.forget_node(node_id)
         await alert_engine.node_offline(
             node_id, detail=f"No heartbeat from {node_id} for {mins} min."
         )

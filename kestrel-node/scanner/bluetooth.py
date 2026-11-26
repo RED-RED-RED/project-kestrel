@@ -41,6 +41,7 @@ from publisher.gps import GPSDaemon
 from scanner.hci_le import (
     HCIError, HCIUnavailable, HCIUserChannel, LEScanner, rid_service_data,
 )
+from scanner.health import RadioHealth, flag_quiet as _flag_quiet
 
 log = logging.getLogger("bluetooth")
 
@@ -91,6 +92,13 @@ class BluetoothScanner:
         self._rid_adverts = 0
         self._published = 0
         self._last_stats = time.monotonic()
+        self.health = RadioHealth("bt", "bt", "Bluetooth", hci=f"hci{hci_index}",
+                                  long_range=None, backend=None)
+
+    def status(self) -> dict:
+        """Live health snapshot for the heartbeat."""
+        snap = self.health.snapshot({"adverts_per_min": "adverts", "rid_10m": "rid"})
+        return _flag_quiet(snap, "adverts_per_min", "no BLE adverts received in the last minute")
 
     # ── Entry point ─────────────────────────────────────────────────────────
 
@@ -104,6 +112,7 @@ class BluetoothScanner:
             except HCIUnavailable as e:
                 if self.backend == "hci":
                     log.error(f"HCI backend unavailable: {e}. Bluetooth scanning disabled.")
+                    self.health.down(f"HCI unavailable: {e}")
                     return
                 log.warning(
                     f"HCI backend unavailable ({e}). Falling back to BlueZ/bleak: "
@@ -115,10 +124,13 @@ class BluetoothScanner:
                            capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             pass
+        self.health.set(backend="bleak", long_range=False)
+        self.health.degraded("BlueZ fallback: most adverts missed, Long Range off")
         try:
             asyncio.run(self._run_bleak())
         except ImportError:
             log.error("bleak is not installed. Bluetooth scanning disabled.")
+            self.health.down("HCI unavailable and bleak not installed")
         log.info("Bluetooth scanner stopped.")
 
     # ── HCI backend ─────────────────────────────────────────────────────────
@@ -134,6 +146,7 @@ class BluetoothScanner:
                 if first:
                     raise
                 log.warning(f"hci{self.hci_index} not available, retrying in 5 s")
+                self.health.down(f"hci{self.hci_index} not available")
                 self.stop_event.wait(5)
                 continue
 
@@ -145,14 +158,19 @@ class BluetoothScanner:
                 log.info(f"hci{self.hci_index}: {scanner.feature_summary}")
                 if scanner.ext_error:
                     log.warning(f"hci{self.hci_index}: extended scan commands rejected ({scanner.ext_error})")
+                self.health.set(backend="hci", long_range=bool(scanner.coded))
                 if self.enable_coded_phy and not scanner.coded:
                     log.warning(
                         "BT5 Long Range (Coded PHY) is off: the dongle firmware does not "
                         "support extended scanning. BT4 Remote ID still works."
                     )
+                    self.health.degraded("Long Range (Coded PHY) unsupported by dongle firmware")
+                else:
+                    self.health.running()
                 while not self.stop_event.is_set():
                     for r in scanner.read_reports(timeout=0.5):
                         self._adverts += 1
+                        self.health.count("adverts")
                         body = rid_service_data(r.data)
                         if body is not None:
                             self._handle_rid(r.address, r.rssi, body, phy=r.phy_label)
@@ -161,6 +179,7 @@ class BluetoothScanner:
                 if first:
                     raise HCIUnavailable(f"controller did not initialise: {e}") from e
                 log.error(f"HCI scan error: {e}. Reopening in 5 s")
+                self.health.down(f"HCI scan error: {e}")
                 self.stop_event.wait(5)
             finally:
                 scanner.stop()
@@ -178,16 +197,20 @@ class BluetoothScanner:
         )
         while not self.stop_event.is_set():
             try:
+                if self.health.state == "down":
+                    self.health.degraded("BlueZ fallback: most adverts missed, Long Range off")
                 async with scanner:
                     await asyncio.sleep(10)
             except Exception as e:
                 log.error(f"BLE scan error: {e} — retrying in 5 s")
+                self.health.down(f"BLE scan error: {e}")
                 await asyncio.sleep(5)
             self._log_stats()
 
     def _on_advertisement(self, device, adv):
         """bleak detection callback."""
         self._adverts += 1
+        self.health.count("adverts")
         body = self._extract_rid_payload(adv)
         if body is not None:
             self._handle_rid(device.address, adv.rssi or 0, body, phy="1M")
@@ -221,6 +244,7 @@ class BluetoothScanner:
             return
 
         self._published += 1
+        self.health.count("rid")
         log.info(
             f"RID via BT ({phy})  id={frame.drone_id}  rssi={rssi} dBm  "
             f"{frame.lat:.5f},{frame.lon:.5f}  agl={frame.height_agl:.1f}m"

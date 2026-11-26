@@ -36,6 +36,7 @@ except ImportError:
 
 from scanner.sdr_classify import iq_to_spectrogram, classify
 from scanner.sdr_source import IQSource, make_source, SDRSourceError
+from scanner.health import RadioHealth, flag_quiet as _flag_quiet
 
 
 # ── Band plan ────────────────────────────────────────────────────────────────
@@ -103,12 +104,26 @@ class SDRScanner:
         self._last_pub: dict[str, float] = {}
         self._stats = {"captures": 0, "classified": 0, "published": 0}
         self._last_stats = time.monotonic()
+        rid = f"sdr_{serial}" if serial else f"sdr_{backend}{device_index}"
+        name = {"rtlsdr": "RTL-SDR", "hackrf": "HackRF"}.get(backend, backend)
+        self.health = RadioHealth(
+            rid, "sdr", f"{name} {serial}" if serial else f"{name} #{device_index}",
+            backend=backend, serial=serial,
+            device_index=None if serial else device_index,
+            bands=list(bands) if bands else None,
+        )
+
+    def status(self) -> dict:
+        """Live health snapshot for the heartbeat."""
+        snap = self.health.snapshot({"captures_per_min": "captures", "links_10m": "links"})
+        return _flag_quiet(snap, "captures_per_min", "no captures in the last minute (reads failing)")
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def run(self):
         if not _NUMPY:
             log.error("numpy not available — SDR scanner exiting")
+            self.health.down("numpy not available")
             return
 
         source = self._source
@@ -118,20 +133,25 @@ class SDRScanner:
                                      sample_rate=self.sample_rate, serial=self.serial)
             except SDRSourceError as e:
                 log.error(f"SDR backend unavailable: {e}. SDR scanner exiting.")
+                self.health.down(f"backend unavailable: {e}")
                 return
         try:
             source.open()
         except SDRSourceError as e:
             log.error(f"Could not open SDR: {e}. SDR scanner exiting.")
+            self.health.down(str(e))
             return
 
         steps = self._build_steps(source)
         if not steps:
             log.error(f"No scan bands reachable by {source.name}. SDR scanner exiting.")
+            self.health.down("no configured bands are in this SDR's tuning range")
             source.close()
             return
 
         bands_seen = sorted({b for b, _ in steps})
+        self.health.set(bands=bands_seen)
+        self.health.running()
         log.info(f"SDR scanner running on {source.name}: bands {', '.join(bands_seen)}, "
                  f"{len(steps)} steps, {source.sample_rate/1e6:.0f} MS/s")
 
@@ -175,6 +195,7 @@ class SDRScanner:
             return
 
         self._stats["captures"] += 1
+        self.health.count("captures")
         spec = iq_to_spectrogram(iq, source.sample_rate)
         c = classify(spec, band)
         if c.signal_type == "unknown" or c.confidence < self.min_confidence:
@@ -208,6 +229,7 @@ class SDRScanner:
         try:
             self.publisher.publish_rf_detection(signal, self.gps)
             self._stats["published"] += 1
+            self.health.count("links")
             log.info(f"RF link: {c.signal_type} @ {band} "
                      f"{signal['center_freq_hz']/1e6:.1f} MHz "
                      f"rssi={signal['rssi']:.0f} conf={c.confidence:.0%}")

@@ -95,6 +95,9 @@ class NodeConfig:
 
     # ---- Agent behaviour ----
     heartbeat_interval_s: int = 10
+    # Full per-radio status rides on a heartbeat this often, and immediately
+    # whenever a radio changes state; heartbeats in between stay small.
+    radio_status_interval_s: int = 60
     dedup_window_s: float = 2.0          # Suppress duplicate detections within this window
     max_queue_size: int = 1000
 

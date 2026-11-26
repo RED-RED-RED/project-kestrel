@@ -55,6 +55,19 @@ class NodeHeartbeat(BaseModel):
     radios:         list[str] = []
     jamming_state:  Optional[str] = None   # GPS jamming indicator from UBX-NAV-STATUS
     spoofing_state: Optional[str] = None   # GPS spoofing indicator from UBX-NAV-STATUS
+    # Live per-radio health (node scanner/health.py). Present on the full
+    # status heartbeats (about once a minute, or on any state change).
+    radio_status:   Optional[list[dict]] = None
+
+    def model_post_init(self, __context) -> None:
+        # Newer nodes carry GPS jamming/spoofing/survey in the GPS radio entry.
+        for r in self.radio_status or []:
+            if r.get("id") == "gps":
+                d = r.get("detail") or {}
+                self.jamming_state  = self.jamming_state  or d.get("jamming")
+                self.spoofing_state = self.spoofing_state or d.get("spoofing")
+                if "survey" in d and "survey_complete" not in self.gps:
+                    self.gps["survey_complete"] = bool(d["survey"])
 
 
 class NodeOut(BaseModel):
@@ -73,6 +86,7 @@ class NodeOut(BaseModel):
     temp_c: Optional[float] = None
     uptime_s: Optional[int] = None
     radios: list[str] = []
+    radio_status: Optional[list[dict]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -102,6 +102,8 @@ async def _create_schema(pool: Pool):
         # Idempotently add new columns to existing deployments
         for col, dtype in [
             ("jamming_state",   "VARCHAR"),
+            ("radio_status",    "JSONB"),
+            ("radio_status_at", "TIMESTAMPTZ"),
             ("spoofing_state",  "VARCHAR"),
             ("survey_complete", "BOOLEAN DEFAULT FALSE"),
         ]:

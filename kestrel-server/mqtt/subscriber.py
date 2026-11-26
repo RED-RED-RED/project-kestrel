@@ -27,6 +27,8 @@ from core.config import Settings
 from db.database import get_pool
 from models.schemas import DetectionEvent, NodeHeartbeat, RFDetectionEvent, AircraftReport
 from core.aircraft_store import aircraft_store
+from core.radio_watch import radio_watch
+from core import runtime_settings as rt
 from analysis.agl import resolve_drone_agl, resolve_aircraft_agl_ft
 from analysis import rid_identity
 from mqtt.alert_engine import AlertEngine
@@ -311,9 +313,11 @@ class MQTTSubscriber:
                     node_id, status, last_seen,
                     lat, lon, alt, gps_fix, satellites,
                     cpu_pct, mem_pct, disk_pct, temp_c, uptime_s,
-                    radios, jamming_state, spoofing_state, survey_complete
+                    radios, jamming_state, spoofing_state, survey_complete,
+                    radio_status, radio_status_at
                 ) VALUES ($1, 'online', to_timestamp($2), $3, $4, $5, $6, $7,
-                          $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                          $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                          $17::jsonb, CASE WHEN $17::jsonb IS NULL THEN NULL ELSE to_timestamp($2) END)
                 ON CONFLICT (node_id) DO UPDATE SET
                     status          = 'online',
                     last_seen       = to_timestamp($2),
@@ -328,9 +332,14 @@ class MQTTSubscriber:
                     temp_c          = $11,
                     uptime_s        = $12,
                     radios          = $13,
-                    jamming_state   = $14,
-                    spoofing_state  = $15,
-                    survey_complete = $16
+                    -- Missing on small heartbeats from newer nodes: keep the last value
+                    jamming_state   = COALESCE($14, nodes.jamming_state),
+                    spoofing_state  = COALESCE($15, nodes.spoofing_state),
+                    survey_complete = COALESCE($16, nodes.survey_complete),
+                    -- Full radio status rides on some heartbeats only: keep the last one
+                    radio_status    = COALESCE($17::jsonb, nodes.radio_status),
+                    radio_status_at = CASE WHEN $17::jsonb IS NULL THEN nodes.radio_status_at
+                                           ELSE to_timestamp($2) END
             """,
                 hb.node_id, hb.ts,
                 hb.gps.get("lat", 0.0),
@@ -346,7 +355,8 @@ class MQTTSubscriber:
                 hb.radios or [],
                 hb.jamming_state,
                 hb.spoofing_state,
-                hb.gps.get("survey_complete", False),
+                hb.gps.get("survey_complete"),
+                json.dumps(hb.radio_status, separators=(",", ":")) if hb.radio_status is not None else None,
             )
 
             # Append a health-history sample for the System tab (best effort —
@@ -372,6 +382,13 @@ class MQTTSubscriber:
 
         # Fire GPS jamming alert if needed
         await self.alert_engine.evaluate_heartbeat(hb)
+
+        # A radio on this (online) node that has stayed down
+        if hb.radio_status is not None:
+            for radio in radio_watch.evaluate(hb.node_id, hb.radio_status,
+                                              rt.get("radio_down_after_s")):
+                await self.alert_engine.radio_down(
+                    hb.node_id, radio, hb.gps.get("lat"), hb.gps.get("lon"))
 
         # Critical node-health pushes (temp/disk) — fire-and-forget, only when
         # notifications are actually configured/enabled.
@@ -403,6 +420,7 @@ class MQTTSubscriber:
 
         if status == "offline":
             log.warning(f"Node {node_id} went offline (LWT received)")
+            radio_watch.forget_node(node_id)
             await self.alert_engine.node_offline(node_id)
 
         await self.broadcaster.broadcast_node_update(node_id, status, payload)

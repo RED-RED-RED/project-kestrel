@@ -19,6 +19,9 @@ import json
 import logging
 import threading
 import urllib.request
+import time
+
+from scanner.health import RadioHealth, flag_quiet as _flag_quiet
 
 log = logging.getLogger("adsb")
 
@@ -44,6 +47,10 @@ class ADSBScanner:
         self.max_age_s = max_age_s
         self.http_timeout_s = http_timeout_s
         self._warned = False
+        self._stats_url = source_url.rsplit("/", 1)[0] + "/stats.json"
+        self._last_msgs: int | None = None
+        self._last_stats_poll = 0.0
+        self.health = RadioHealth("adsb", "adsb", "ADS-B", source=source_url)
 
     # ── Parsing ────────────────────────────────────────────────────────────
     @staticmethod
@@ -90,17 +97,48 @@ class ADSBScanner:
         with urllib.request.urlopen(self.source_url, timeout=self.http_timeout_s) as r:
             return json.loads(r.read().decode("utf-8", "replace"))
 
+    # ── Health ─────────────────────────────────────────────────────────────
+    def _track(self, data: dict, n_positioned: int):
+        """Update health from a successful aircraft.json poll."""
+        self.health.running()
+        self.health.set(aircraft=n_positioned)
+        msgs = data.get("messages")
+        if isinstance(msgs, int):
+            if self._last_msgs is not None and msgs >= self._last_msgs:
+                self.health.count("messages", msgs - self._last_msgs)
+            self._last_msgs = msgs
+        # Receiver signal/noise from stats.json, every 30 s (cheap, best-effort)
+        now = time.time()
+        if now - self._last_stats_poll >= 30:
+            self._last_stats_poll = now
+            try:
+                with urllib.request.urlopen(self._stats_url, timeout=self.http_timeout_s) as r:
+                    local = json.loads(r.read()).get("last1min", {}).get("local", {})
+                self.health.set(signal_db=local.get("signal"), noise_db=local.get("noise"))
+            except Exception:
+                pass
+
+    def status(self) -> dict:
+        """Live health snapshot for the heartbeat."""
+        snap = self.health.snapshot({"messages_per_min": "messages"})
+        return _flag_quiet(snap, "messages_per_min",
+                           "dump1090 decoding nothing (antenna / line of sight?)")
+
     # ── Lifecycle ──────────────────────────────────────────────────────────
     def run(self):
         log.info(f"ADS-B scanner starting — source {self.source_url}")
         while not self.stop_event.is_set():
             try:
-                aircraft = self._collect(self._fetch())
+                data = self._fetch()
+                aircraft = self._collect(data)
                 self.publisher.publish_aircraft(aircraft, self.gps)
+                self._track(data, len(aircraft))
                 if self._warned:
                     log.info("ADS-B source reachable again.")
                     self._warned = False
             except Exception as e:
+                self.health.down(f"dump1090 unreachable: {e}")
+                self._last_msgs = None
                 if not self._warned:
                     log.warning(
                         f"ADS-B source unreachable ({self.source_url}): {e} — "

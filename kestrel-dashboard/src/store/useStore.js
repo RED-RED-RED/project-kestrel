@@ -199,6 +199,9 @@ export const useStore = create((set, get) => ({
           status:  payload.status,
           ...(payload.data?.system || {}),
           ...(payload.data?.gps ? { lat: payload.data.gps.lat, lon: payload.data.gps.lon } : {}),
+          // Full per-radio status rides on some heartbeats only; keep the last one
+          ...(Array.isArray(payload.data?.radio_status)
+            ? { radio_status: payload.data.radio_status, radio_status_at: new Date().toISOString() } : {}),
         }
       }
     }))

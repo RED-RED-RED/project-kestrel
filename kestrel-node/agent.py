@@ -31,6 +31,7 @@ from scanner.sdr import SDRScanner
 from scanner.adsb import ADSBScanner
 from publisher.mqtt_client import MQTTPublisher
 from publisher.gps import GPSDaemon
+from scanner.health import collect as collect_radio_status, off as radio_off, StatusThrottle
 
 # --------------------------------------------------------------------------- #
 # Logging
@@ -95,6 +96,7 @@ def main():
 
     # ---- Scanner threads ----
     threads = []
+    health_sources = []   # (status_fn, thread) per scanner, or an "off" dict
 
     # Wi-Fi NAN scanners (one per adapter; each requires its interface in monitor mode)
     wifi_bands_active = []
@@ -111,7 +113,10 @@ def main():
             dwell_ms=cfg.wifi_dwell_ms_2g,
         )
         threads.append(threading.Thread(target=wifi_2g.run, name="wifi-nan-2g", daemon=True))
+        health_sources.append((wifi_2g.status, threads[-1]))
         wifi_bands_active.append(f"2.4 GHz ({cfg.wifi_interface_2g})")
+    else:
+        health_sources.append(radio_off("wifi_2g", "wifi", "Wi-Fi 2.4 GHz"))
 
     if cfg.wifi_enabled_5g:
         wifi_5g = WiFiNANScanner(
@@ -125,7 +130,10 @@ def main():
             dwell_ms=cfg.wifi_dwell_ms_5g,
         )
         threads.append(threading.Thread(target=wifi_5g.run, name="wifi-nan-5g", daemon=True))
+        health_sources.append((wifi_5g.status, threads[-1]))
         wifi_bands_active.append(f"5 GHz ({cfg.wifi_interface_5g})")
+    else:
+        health_sources.append(radio_off("wifi_5g", "wifi", "Wi-Fi 5 GHz"))
 
     if wifi_bands_active:
         log.info(f"WiFi NAN scanning: {', '.join(wifi_bands_active)}")
@@ -143,7 +151,11 @@ def main():
         )
         t = threading.Thread(target=bt.run_sync, name="bluetooth", daemon=True)
         threads.append(t)
+        health_sources.append((bt.status, t))
         log.info(f"Bluetooth scanner → hci{cfg.bt_hci_index} (Coded PHY={cfg.bt_coded_phy})")
+
+    if not cfg.bt_enabled:
+        health_sources.append(radio_off("bt", "bt", "Bluetooth"))
 
     # SDR radios (optional — passive RF fingerprinting). Supports several at
     # once, e.g. an RTL-SDR on the sub-GHz control bands plus a HackRF on
@@ -167,6 +179,7 @@ def main():
         )
         t = threading.Thread(target=sdr.run, name=f"sdr-{radio['backend']}-{i}", daemon=True)
         threads.append(t)
+        health_sources.append((sdr.status, t))
         bands_desc = ",".join(radio["bands"]) if radio["bands"] else "auto"
         which = f"serial {radio['serial']}" if radio.get("serial") else f"device {radio['device_index']}"
         log.info(f"SDR scanner → {radio['backend']} ({which}, bands {bands_desc})")
@@ -183,7 +196,10 @@ def main():
             max_age_s=cfg.adsb_max_age_s,
         )
         threads.append(threading.Thread(target=adsb.run, name="adsb", daemon=True))
+        health_sources.append((adsb.status, threads[-1]))
         log.info(f"ADS-B scanner → {cfg.adsb_source_url}")
+    else:
+        health_sources.append(radio_off("adsb", "adsb", "ADS-B"))
 
     if not threads:
         log.error("No scanners enabled — check config. Exiting.")
@@ -202,9 +218,12 @@ def main():
     if cfg.adsb_enabled:     active_radios.append("adsb")
 
     # ---- Heartbeat loop ----
+    throttle = StatusThrottle(cfg.radio_status_interval_s)
     try:
         while not _stop_event.is_set():
-            publisher.send_heartbeat(gps, radios=active_radios)
+            status = collect_radio_status(health_sources, gps)
+            publisher.send_heartbeat(gps, radios=active_radios,
+                                     radio_status=status if throttle.due(status) else None)
             time.sleep(cfg.heartbeat_interval_s)
     finally:
         log.info("Stopping…")

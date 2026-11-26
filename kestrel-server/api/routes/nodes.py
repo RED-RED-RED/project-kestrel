@@ -6,6 +6,8 @@ api/routes/alerts.py — Alert management endpoints
 
 # ---- nodes.py ----
 
+import json
+
 from fastapi import APIRouter, HTTPException
 from db.database import get_pool
 
@@ -32,7 +34,10 @@ async def get_node(node_id: str):
         row = await conn.fetchrow("SELECT * FROM nodes WHERE node_id = $1", node_id)
     if not row:
         raise HTTPException(status_code=404, detail="Node not found")
-    return dict(row)
+    d = dict(row)
+    if isinstance(d.get("radio_status"), str):      # JSONB arrives as text
+        d["radio_status"] = json.loads(d["radio_status"])
+    return d
 
 
 @router.get("/{node_id}/detections")
