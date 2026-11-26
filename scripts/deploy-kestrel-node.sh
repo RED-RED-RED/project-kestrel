@@ -186,7 +186,7 @@ if [[ "$ADSB_STR" == "true" ]] && ! command -v dump1090-fa >/dev/null 2>&1; then
   step 1b "dump1090-fa (ADS-B 1090 MHz)"
   _tmp="$(mktemp -d)"
   if wget -qO "$_tmp/fa-repo.deb" \
-       "https://www.flightaware.com/adsb/piaware/files/packages/pool/piaware/f/flightaware-apt-repository/flightaware-apt-repository_1.2_all.deb" \
+       "https://www.flightaware.com/adsb/piaware/files/packages/pool/piaware/f/flightaware-apt-repository/flightaware-apt-repository_1.3_all.deb" \
      && dpkg -i "$_tmp/fa-repo.deb" >/dev/null 2>&1; then
     apt-get update -qq || true
     if DEBIAN_FRONTEND=noninteractive apt-get install -y dump1090-fa >/dev/null 2>&1; then
