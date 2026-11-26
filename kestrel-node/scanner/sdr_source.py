@@ -161,8 +161,16 @@ class RtlSdrSource(IQSource):
             try:
                 self.device_index = RtlSdr.get_device_index_by_serial(self.serial)
             except Exception as e:
+                # pyrtlsdr labels librtlsdr's "no matching serial" (-3) as
+                # LIBUSB_ERROR_ACCESS, which reads like a permissions problem.
+                # Say what's actually connected instead.
+                try:
+                    found = ", ".join(RtlSdr.get_device_serial_addresses()) or "none"
+                except Exception:
+                    found = "unknown"
                 raise SDRSourceError(
-                    f"No RTL-SDR with serial {self.serial!r} (set one with rtl_eeprom -s): {e}"
+                    f"No RTL-SDR with serial {self.serial!r}. Connected serials: {found}. "
+                    f"Set one with rtl_eeprom -s, then replug the dongle."
                 ) from e
         try:
             self._sdr = RtlSdr(self.device_index)

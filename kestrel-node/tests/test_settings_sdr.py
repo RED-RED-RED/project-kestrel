@@ -71,6 +71,10 @@ def _fake_rtlsdr(monkeypatch, serials):
                 raise IOError("not found")
             return serials.index(serial)
 
+        @staticmethod
+        def get_device_serial_addresses():
+            return list(serials)
+
         def __init__(self, index):
             opened.append(index)
 
@@ -91,5 +95,6 @@ def test_rtlsdr_unknown_serial_is_a_clear_error(monkeypatch):
     from scanner.sdr_source import make_source, SDRSourceError
     _fake_rtlsdr(monkeypatch, ["ADSB1090"])
     src = make_source("rtlsdr", serial="KESTREL")
-    with pytest.raises(SDRSourceError, match="rtl_eeprom"):
+    with pytest.raises(SDRSourceError, match="rtl_eeprom") as exc:
         src.open()
+    assert "Connected serials: ADSB1090" in str(exc.value)
