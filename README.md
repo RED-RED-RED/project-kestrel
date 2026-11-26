@@ -28,7 +28,9 @@
 
 KESTREL detects FAA-mandated Remote ID broadcasts from drones across all three radio technologies (Wi-Fi NAN, Bluetooth 4 legacy, Bluetooth 5 Long Range), correlates detections from multiple sensor nodes, estimates true drone position via RSSI trilateration (MLAT), and scores each drone with an 8-factor threat model. Everything streams live to KESTREL — a tactical operations dashboard with a real Leaflet map, animated threat gauges, and a live packet feed.
 
-![KESTREL](docs/screenshot.png)
+![KESTREL live map: three nodes, a high-threat drone with an MLAT mismatch, an ELRS link with no Remote ID, and ADS-B traffic](docs/screenshot.png)
+
+<sub>Screenshots use simulated data and a placeholder basemap.</sub>
 
 ---
 
@@ -449,6 +451,10 @@ KESTREL connects to the KESTREL Server via WebSocket (`/ws`) and receives a full
 | **Packet Feed** | Detection stream pre-seeded with the last 150 detections on load, then live via WebSocket. Includes SDR-classified RF links with RID / no-RID tags. |
 | **Flights** | Historical sorties — detections grouped into flights (new flight after a >5 min gap). Filterable flight list; the selected flight shows its path, operator location, detecting nodes, altitude/speed profile, a time-scrub replay, and GPX/KML/CSV export. No-RID / RF-only contacts are listed separately. |
 | **System** | Live status cards for every node and the server (CPU/mem/disk, temp, uptime, GPS sats, DB/MQTT), each node with its **Radios** table: every radio's state, live rates and the reason if something's wrong. Historical charts (1h–7d range, ~7-day retention) with warning bands. The **Settings** tab holds the live-editable alert thresholds, including node offline / radio down timing and the low-aircraft advisory. |
+
+![Threats view: score gauges, factor breakdown and MLAT detail](docs/screenshot-threats.png)
+
+![System view: per-node health cards with the Radios table](docs/screenshot-system.png)
 
 ### Sidebar
 
