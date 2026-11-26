@@ -1,5 +1,8 @@
 # ── Secrets & local config ─────────────────────────────────────
 kestrel-server/docker/.env
+kestrel-server/docker/.env.bak-*
+# server deploy summary: contains passwords
+DEPLOYMENT.md
 kestrel-server/docker/mosquitto_passwd
 kestrel-server/docker/passwd
 kestrel-server/docker/docker-compose.override.yml

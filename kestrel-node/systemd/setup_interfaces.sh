@@ -10,8 +10,16 @@
 
 set -euo pipefail
 
-WIFI_IFACE_2G="wlan1"    # Primary adapter — 2.4 GHz
-WIFI_IFACE_5G="wlan2"    # Secondary adapter — 5 GHz (optional)
+# Interface names come from the node config (wifi.interface_2g / interface_5g),
+# so a node deployed with --wifi-iface / --wifi-iface-5g gets the right ones.
+CONFIG="${KESTREL_CONFIG:-/etc/kestrel-node/config.yaml}"
+cfg_iface() {   # cfg_iface <key> <default>: first "key: value" in the file, unquoted
+    local v=""
+    [[ -r "$CONFIG" ]] && v="$(sed -n "s/^[[:space:]]*$1:[[:space:]]*\"\{0,1\}\([A-Za-z0-9_.-]*\)\"\{0,1\}.*/\1/p" "$CONFIG" | head -1)"
+    echo "${v:-$2}"
+}
+WIFI_IFACE_2G="$(cfg_iface interface_2g wlan1)"    # Primary adapter — 2.4 GHz
+WIFI_IFACE_5G="$(cfg_iface interface_5g wlan2)"    # Secondary adapter — 5 GHz (optional)
 
 # ---- Helper: put an interface into monitor mode ----
 setup_monitor() {

@@ -13,16 +13,16 @@ test: test-node test-server test-cal
 
 test-node:
 	@echo "── KESTREL Node — parser tests (11) ──"
-	python -m pytest kestrel-node/tests/ -v
+	cd kestrel-node && python3 -m pytest tests/ -q
 
 test-server:
 	@echo "── KESTREL Server — alert engine + analysis + integrations ──"
 	pip install -q -r kestrel-server/requirements-dev.txt
-	python -m pytest kestrel-server/tests/ -v
+	cd kestrel-server && python3 -m pytest tests/ -q
 
 test-cal:
 	@echo "── Calibration — engine + collector + writer (31) ──"
-	python -m pytest calibration/tests/ -v
+	cd calibration && python3 -m pytest -q
 
 # ── KESTREL dashboard (UI) ──────────────────────────────────────────────────────
 

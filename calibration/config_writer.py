@@ -15,9 +15,7 @@ The trilateration engine is updated to load calibration.yaml on startup.
 Per-node values override the global constants for that node's observations.
 """
 
-import json
 import logging
-import os
 import re
 import time
 from datetime import datetime, timezone

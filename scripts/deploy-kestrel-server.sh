@@ -13,8 +13,10 @@
 #   bash deploy-kestrel-server.sh \
 #     --unattended \
 #     --db-password your_db_pass \
-#     --mqtt-password your_mqtt_pass \
-#     --host 0.0.0.0
+#     --mqtt-password your_mqtt_pass
+#
+# Re-running on an existing deployment keeps kestrel-server/docker/.env
+# (database + MQTT passwords, API key, notification settings) as it is.
 # ============================================================
 
 set -euo pipefail
@@ -33,7 +35,7 @@ DOCKER_DIR="kestrel-server/docker"
 
 # ── Argument parsing ─────────────────────────────────────────────────────
 UNATTENDED=false
-OPT_DB_PASS=""; OPT_MQTT_PASS=""; OPT_HOST="0.0.0.0"; OPT_REPO=""; OPT_CARTO_KEY=""
+OPT_DB_PASS=""; OPT_MQTT_PASS=""; OPT_REPO=""; OPT_CARTO_KEY=""
 OPT_SKIP_UI=false; OPT_SKIP_DOCKER=false
 
 while [[ $# -gt 0 ]]; do
@@ -41,7 +43,7 @@ while [[ $# -gt 0 ]]; do
     --unattended)    UNATTENDED=true;;
     --db-password)   OPT_DB_PASS="$2";   shift;;
     --mqtt-password) OPT_MQTT_PASS="$2"; shift;;
-    --host)          OPT_HOST="$2";      shift;;   # accepted for compatibility, unused
+    --host)          shift;;   # accepted for compatibility with old scripts; no effect
     --carto-key)     OPT_CARTO_KEY="$2"; shift;;
     --repo)          OPT_REPO="$2";      shift;;
     --skip-ui)       OPT_SKIP_UI=true;;
@@ -73,7 +75,36 @@ gen_password() {
     print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"
 }
 
-if [[ "$UNATTENDED" == false ]]; then
+# An existing deployment keeps its .env. Postgres only takes its password when
+# the data volume is first created, so a new DB password would lock the API
+# out; a new MQTT password would disconnect every node.
+EXISTING_ENV=""
+for _d in "$(pwd)" "$INSTALL_DIR"; do
+  if [[ -f "$_d/$DOCKER_DIR/.env" ]]; then EXISTING_ENV="$_d/$DOCKER_DIR/.env"; break; fi
+done
+env_get() { grep -E "^$1=" "$EXISTING_ENV" | tail -1 | cut -d= -f2-; }
+
+if [[ -n "$EXISTING_ENV" ]]; then
+  info "Existing deployment found: $EXISTING_ENV"
+  info "Keeping its database and MQTT passwords and all other settings."
+  DB_PASS="$(env_get DB_PASSWORD)"
+  MQTT_PASS="$(env_get MQTT_PASSWORD)"
+  [[ -n "$DB_PASS" && -n "$MQTT_PASS" ]] || fail "Existing .env has no DB_PASSWORD/MQTT_PASSWORD: fix or move it aside, then re-run"
+  if [[ -n "$OPT_DB_PASS" && "$OPT_DB_PASS" != "$DB_PASS" ]]; then
+    warn "Ignoring --db-password: the existing database was created with the password in .env"
+  fi
+  if [[ -n "$OPT_MQTT_PASS" && "$OPT_MQTT_PASS" != "$MQTT_PASS" ]]; then
+    MQTT_PASS="$OPT_MQTT_PASS"
+    warn "MQTT password changing: update every node's /etc/kestrel-node/config.yaml to match"
+  fi
+  CARTO_KEY="${OPT_CARTO_KEY}"
+  if [[ "$UNATTENDED" == false ]]; then
+    echo ""
+    echo "  CARTO basemap API key (free: https://carto.com/basemaps/apikey/)"
+    echo "  Leave blank to keep the existing key."
+    read -rsp "    Key: " CARTO_KEY; echo
+  fi
+elif [[ "$UNATTENDED" == false ]]; then
   echo "  Press Enter to accept suggested secure passwords, or type your own."
   echo ""
 
@@ -109,11 +140,9 @@ if [[ "$UNATTENDED" == false ]]; then
   echo "  CARTO basemap API key (free: https://carto.com/basemaps/apikey/)"
   echo "  Needed for the dashboard map. Leave blank to keep an existing key."
   read -rsp "    Key: " CARTO_KEY; echo
-  BIND_HOST="0.0.0.0"
 else
   DB_PASS="${OPT_DB_PASS:-$(gen_password)}"
   MQTT_PASS="${OPT_MQTT_PASS:-$(gen_password)}"
-  BIND_HOST="${OPT_HOST}"
   CARTO_KEY="${OPT_CARTO_KEY}"
 fi
 
@@ -151,6 +180,18 @@ step 3 "Environment configuration"
 cd "$INSTALL_DIR"
 
 ENV_FILE="$DOCKER_DIR/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  cp -p "$ENV_FILE" "$ENV_FILE.bak-$(date +%Y%m%d-%H%M%S)"
+  # Only the MQTT password can change on a re-run; everything else stays.
+  ENV_FILE="$ENV_FILE" NEW_MQTT="$MQTT_PASS" python3 - << 'PY'
+import os
+p, new = os.environ["ENV_FILE"], os.environ["NEW_MQTT"]
+lines = open(p).read().splitlines()
+lines = [f"MQTT_PASSWORD={new}" if l.startswith("MQTT_PASSWORD=") else l for l in lines]
+open(p, "w").write("\n".join(lines) + "\n")
+PY
+  ok "Kept existing $ENV_FILE (backup saved next to it)"
+else
 cat > "$ENV_FILE" << ENV
 # KESTREL Server — Environment
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -162,8 +203,9 @@ DB_PASSWORD=${DB_PASS}
 MQTT_USER=rid
 MQTT_PASSWORD=${MQTT_PASS}
 ENV
-chmod 600 "$ENV_FILE"
 ok "Environment written to $ENV_FILE"
+fi
+chmod 600 "$ENV_FILE"
 
 # Mosquitto password file
 info "Creating Mosquitto password file..."
@@ -340,5 +382,5 @@ echo -e "  ${BLUE}    --server-ip ${SERVER_IP} \\${NC}"
 echo -e "  ${BLUE}    --mqtt-password '${MQTT_PASS:0:4}...'${NC}"
 echo ""
 echo "  Health check:"
-echo "    python scripts/healthcheck.py --server http://${SERVER_IP}"
+echo "    python3 scripts/healthcheck.py --server ${SERVER_IP}"
 echo ""

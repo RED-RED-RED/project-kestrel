@@ -6,7 +6,7 @@ Pydantic v2 models for API request/response validation and serialization.
 
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict
 
 
 # ------------------------------------------------------------------ #

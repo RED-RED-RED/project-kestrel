@@ -24,28 +24,39 @@ deconfliction advisory, since that is the drone operating band.
 
 ## Multiple RTL-SDRs: pin them by serial
 
-Once you have more than one RTL-SDR (the KESTREL sub-GHz scanner plus the 1090
-dongle), device index order is **not stable** across reboots, so dump1090 and
-the node scanner can grab each other's dongle. Give each a unique serial once:
+With two RTL-SDRs (the KESTREL sub-GHz scanner plus the 1090 dongle), device
+index order is **not stable** across reboots, so dump1090 and the node scanner
+can grab each other's dongle. Most dongles ship with the same serial
+(`00000001`), so give each its own, once. It's stored on the dongle, so it
+survives reboots, reimaging and moving it to another node.
 
 ```bash
-# list what's attached and their current serials
-rtl_test        # Ctrl-C after it prints the device list
-
-# write serials (do one dongle at a time; -d is the current index)
-rtl_eeprom -d 0 -s KESTREL   # the sub-GHz scanner dongle
-rtl_eeprom -d 1 -s ADSB1090  # the 1090 dongle
-# replug the dongles afterward
+sudo systemctl stop kestrel-node dump1090-fa
+rtl_test -t      # lists each dongle: index, model, serial
 ```
 
-Then point each tool at its dongle by serial:
+If two show the same serial, write new ones. Different models (say a Nooelec
+and an RTL-SDR Blog V4) can be told apart by name in that list, so both can stay
+plugged in; with two identical dongles, unplug one first so `-d 0` is certain.
 
-- **dump1090-fa** — edit `/etc/default/dump1090-fa`, set:
+```bash
+rtl_eeprom -d 0 -s ADSB1090   # the 1090 dongle (answer y)
+rtl_eeprom -d 1 -s KESTREL    # the sub-GHz scanner dongle (answer y)
+```
+
+**Unplug and replug both**: the serial is only read when a dongle connects.
+`rtl_test -t` should now show the new serials. (The `PLL not locked` / `No E4000
+tuner found` lines `-t` prints are normal: that test is for a different tuner.)
+
+The deploy script does the next two steps for you with
+`--sdr-serial KESTREL --adsb-serial ADSB1090`. By hand:
+
+- **dump1090-fa**: in `/etc/default/dump1090-fa` set
   ```
-  RECEIVER_OPTIONS="--device ADSB1090 --gain -10 --ppm 0 --net-bo-port 30005 --fix"
+  RECEIVER_SERIAL=ADSB1090
   ```
   then `sudo systemctl restart dump1090-fa`.
-- **KESTREL sub-GHz scanner** — add `serial:` to its `sdrs:` entry in
+- **KESTREL sub-GHz scanner**: add `serial:` to its `sdrs:` entry in
   `/etc/kestrel-node/config.yaml` (serial wins over `device_index`):
   ```yaml
   sdrs:
@@ -60,8 +71,17 @@ Then point each tool at its dongle by serial:
 
 ## Enable it
 
-1. Install dump1090-fa (the deploy script does this with `--enable-adsb`, or
-   install it manually from the FlightAware apt repo).
+Deploying the node with `--enable-adsb` (plus the serial flags above) does all
+of this. By hand:
+
+1. Install dump1090-fa from FlightAware's apt repo:
+   ```bash
+   wget https://www.flightaware.com/adsb/piaware/files/packages/pool/piaware/f/flightaware-apt-repository/flightaware-apt-repository_1.3_all.deb
+   sudo dpkg -i flightaware-apt-repository_1.3_all.deb
+   sudo apt update && sudo apt install -y dump1090-fa
+   ```
+   It starts straight away and opens the first RTL-SDR it finds, so set
+   `RECEIVER_SERIAL` (above) before relying on it.
 2. In `/etc/kestrel-node/config.yaml`:
    ```yaml
    adsb:
@@ -73,15 +93,29 @@ Then point each tool at its dongle by serial:
 ## Verify
 
 ```bash
-# dump1090 is decoding (should list aircraft)
-curl -s http://127.0.0.1:8080/data/aircraft.json | head
+# dump1090 opened the right dongle
+journalctl -u dump1090-fa -n 20 --no-pager      # "using device ... SN ADSB1090"
 
-# the node is forwarding them
-journalctl -u kestrel-node -f | grep -i adsb
+# it's decoding: run twice a few seconds apart, messages should climb
+curl -s http://127.0.0.1:8080/data/aircraft.json | jq '{messages, aircraft: (.aircraft | length)}'
+
+# the node is forwarding them (scanners start up to 60 s after boot, waiting for GPS)
+journalctl -u kestrel-node -n 60 --no-pager | grep -iE "ADS-B|RTL-SDR open"
 ```
 
-You should see the ADS-B scanner start, and aircraft appear on the dashboard's
-aircraft layer. A low, nearby aircraft also raises a deconfliction advisory.
+The dashboard's **System** view shows the ADS-B radio with messages per minute
+and signal vs noise; aircraft appear on the map's ADS-B layer. A low, nearby
+aircraft also raises a deconfliction advisory.
+
+### Troubleshooting
+
+| Symptom | Meaning |
+|---|---|
+| `aircraft.json` returns 404 | dump1090-fa isn't running, or can't find its dongle: check `journalctl -u dump1090-fa` |
+| `usb_claim_interface error -6` from `rtl_test` | Another program has that dongle open (normally dump1090 or the node). Expected while they run |
+| Node log: `No RTL-SDR with serial 'KESTREL'. Connected serials: ...` | Serial not set yet, or the dongle wasn't replugged after `rtl_eeprom` |
+| Messages barely climb, signal ≈ noise | Nothing is reaching the antenna. 1090 MHz is line-of-sight: indoors, and especially a basement, gets little or nothing. Try a window, or mount the antenna high outside |
+| RTL-SDR Blog V4 tunes badly | It needs rtl-sdr 2.0.2 (Raspberry Pi OS Trixie). Bookworm's 0.6.0 doesn't support its tuner |
 
 ## How AGL is worked out
 

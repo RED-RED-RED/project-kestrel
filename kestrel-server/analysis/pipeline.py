@@ -22,7 +22,6 @@ is already safely stored. Errors are logged but don't bubble up.
 
 import json
 import logging
-import time
 from typing import Optional
 
 from analysis.trilateration import TrilaterationEngine, NodeObservation, TrilaterationResult
@@ -223,7 +222,6 @@ def _top_factors(threat: ThreatFactors, n: int = 3) -> str:
 
 async def _insert_alert(conn, broadcaster, alert: dict) -> None:
     """Insert alert into DB and broadcast to WS clients."""
-    import time
     try:
         row = await conn.fetchrow("""
             INSERT INTO alerts (level, category, drone_id, node_id, title, description, lat, lon)

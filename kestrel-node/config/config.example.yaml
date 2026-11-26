@@ -24,7 +24,7 @@ mqtt:
 
 # ---- GPS (u-blox NEO-M9N on USB — recommended default) ----
 gps:
-  serial_port: "/dev/ttyACM0"   # USB GPS (NEO-M9N default)
+  serial_port: "/dev/ttyGPS"    # USB GPS: udev symlink to the NEO-M9N (deploy adds the rule)
   # serial_port: "/dev/ttyAMA0" # UART GPS (legacy)
   baud: 38400                    # NEO-M9N USB default — NOT 9600
   mode: "usb"                   # "usb" or "uart"
@@ -53,11 +53,31 @@ bt:
   backend: auto             # auto: direct HCI on the dongle, bleak fallback | hci | bleak
 
 # ---- RTL-SDR (optional) ----
-sdr:
-  enabled: false            # Set true if RTL-SDR is plugged in
-  device_index: 0
+# ---- SDR radios ----
+# One entry per physical SDR, each with its own sweep. Band codes:
+# 433, 900, 1g2 (RTL-SDR reaches these), 2g4, 5g8 (HackRF).
+# With two RTL-SDRs, select by serial (set once with rtl_eeprom, see
+# docs/adsb.md): index order isn't stable across reboots.
+sdrs:
+  - enabled: false          # true once the RTL-SDR is plugged in
+    backend: rtlsdr
+    device_index: 0
+    # serial: KESTREL       # use instead of device_index with 2+ RTL-SDRs
+    bands: ["900", "1g2", "433"]
+  - enabled: false          # HackRF One (deploy with --enable-hackrf)
+    backend: hackrf
+    device_index: 0
+    bands: ["2g4", "5g8"]
+
+# ---- ADS-B (crewed aircraft) ----
+# dump1090-fa on its own 1090 MHz RTL-SDR; it picks the dongle via
+# RECEIVER_SERIAL in /etc/default/dump1090-fa. See docs/adsb.md.
+adsb:
+  enabled: false
+  source_url: "http://127.0.0.1:8080/data/aircraft.json"
 
 # ---- Agent behaviour ----
 heartbeat_interval_s: 10
+radio_status_interval_s: 60   # full per-radio status this often, or on any change
 dedup_window_s: 2.0
 max_queue_size: 1000

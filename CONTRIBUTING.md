@@ -3,7 +3,7 @@
 ## Repository layout
 
 ```
-kestrel-platform/
+project-kestrel/
 ├── kestrel-node/        KESTREL sensor node (Python, runs on each Pi)
 ├── kestrel-server/      KESTREL central server (FastAPI + TimescaleDB)
 ├── kestrel-dashboard/      KESTREL dashboard (React + Leaflet)
@@ -16,11 +16,12 @@ kestrel-platform/
 
 ```bash
 # Clone
-git clone https://github.com/your-org/kestrel-platform
-cd kestrel-platform
+git clone https://github.com/RED-RED-RED/project-kestrel
+cd project-kestrel
 
-# Python deps (for server + calibration)
-pip install -r kestrel-server/requirements.txt
+# Python deps (Python 3.12, matching the server container and CI)
+pip install -r kestrel-server/requirements-dev.txt
+pip install -r kestrel-node/requirements.txt
 pip install -r calibration/requirements.txt
 pip install pytest pytest-asyncio
 
@@ -40,21 +41,23 @@ make ui-dev
 ## Running tests
 
 ```bash
-make test                          # all 83 tests
-make test-node                     # KESTREL node parser tests (11)
-make test-server                   # KESTREL server tests (41)
-python -m pytest calibration/tests # calibration tests (31)
+make test          # everything (each suite runs from its own folder, like CI)
+make test-node     # node: RID parser, GPS, Wi-Fi NAN, Bluetooth, SDR, ADS-B, radio health
+make test-server   # server: alerts, trilateration, threat scoring, RF, flights, settings
+make test-cal      # calibration engine, collector, config writer
 ```
 
 ## Pull request checklist
 
-- [ ] All 83 tests pass (`make test`)
+- [ ] All tests pass (`make test`)
 - [ ] UI builds without errors (`make ui-build`)
 - [ ] New code has corresponding tests
 - [ ] MQTT topic names use `kestrel/` prefix
-- [ ] Node IDs use `KESTREL-NN` format
+- [ ] Node IDs use the `KN-NN` format
 - [ ] No credentials committed (check `.gitignore`)
-- [ ] Deployment scripts updated if install paths changed
+- [ ] Deployment scripts updated if install paths, packages or config keys changed
+- [ ] Shell scripts pass `shellcheck -S warning` and are executable in git
+      (`git update-index --chmod=+x path/to/script.sh`)
 
 ## Coding conventions
 

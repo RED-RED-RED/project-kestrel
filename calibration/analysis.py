@@ -13,10 +13,8 @@ Uses matplotlib (optional). If not installed, outputs a plain-text report.
 """
 
 import logging
-import math
 import os
 from pathlib import Path
-from typing import Optional
 
 from calibration.engine import CalibrationResult, CalibrationSample
 
@@ -98,7 +96,6 @@ def generate_plots(
         import matplotlib
         matplotlib.use("Agg")   # Non-interactive backend for headless use
         import matplotlib.pyplot as plt
-        import matplotlib.gridspec as gridspec
         import numpy as np
     except ImportError:
         log.warning("matplotlib not installed — skipping plot generation. "

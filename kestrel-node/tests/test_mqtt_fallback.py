@@ -91,3 +91,14 @@ def test_no_supervisor_without_fallback():
         assert not hasattr(pub, "_supervisor_thread")
     finally:
         pub._stop.set()
+
+
+def test_topic_prefix_from_config():
+    pub = _make_publisher()
+    sent = []
+    pub._enqueue = lambda topic, payload, qos=1: sent.append(topic)
+    assert pub._prefix == "kestrel"                     # default matches the server
+    pub._prefix = "site-a"
+    gps = MagicMock(lat=0, lon=0, alt=0, has_fix=False, satellites=0)
+    pub.send_heartbeat(gps, radios=[])
+    assert sent == [f"site-a/{pub.node_id}/heartbeat"]

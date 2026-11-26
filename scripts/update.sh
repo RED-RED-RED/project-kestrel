@@ -115,6 +115,26 @@ update_node() {
     warn "Skipping git update (--no-pull); reinstalling $(current_commit)"
   fi
 
+  # Keep the startup hook executable and the installed systemd unit in step
+  # with the repo (deploy-kestrel-node.sh copies it once; changes would
+  # otherwise never reach a deployed node). The installed config path is kept.
+  chmod +x "$REPO_ROOT/kestrel-node/systemd/setup_interfaces.sh" 2>/dev/null || true
+  local unit_src="$REPO_ROOT/kestrel-node/systemd/kestrel-node.service"
+  local unit_dst="/etc/systemd/system/kestrel-node.service"
+  if [[ -f "$unit_src" && -f "$unit_dst" ]]; then
+    local tmp cfg
+    tmp="$(mktemp)"
+    sed "s|/opt/kestrel-node|$REPO_ROOT|g" "$unit_src" > "$tmp"
+    cfg="$(grep -o 'KESTREL_CONFIG=[^"]*' "$unit_dst" | head -1 || true)"
+    [[ -n "$cfg" ]] && sed -i "s|KESTREL_CONFIG=[^\"]*|$cfg|" "$tmp"
+    if ! cmp -s "$tmp" "$unit_dst"; then
+      cp "$tmp" "$unit_dst"
+      systemctl daemon-reload
+      ok "systemd unit updated from the repo"
+    fi
+    rm -f "$tmp"
+  fi
+
   step "2/4" "Updating Python dependencies"
   [[ -x "$venv/bin/pip" ]] || fail "venv not found at $venv — run deploy-kestrel-node.sh first"
   "$venv/bin/pip" install --upgrade pip -q

@@ -2,7 +2,9 @@
 # scripts/deploy-kestrel-node.sh
 # ============================================================
 # Automated KESTREL Node deployment wizard.
-# Run on a fresh Raspberry Pi OS Lite 64-bit (Bookworm) as root.
+# Run on Raspberry Pi OS Lite 64-bit as root. Trixie (Debian 13) recommended:
+# the RTL-SDR Blog V4 needs its rtl-sdr 2.0.2 (Bookworm ships 0.6.0).
+# Re-running is safe: the existing config is backed up before it's rewritten.
 #
 # Usage:
 #   sudo bash deploy-kestrel-node.sh
@@ -18,6 +20,11 @@
 #   --enable-sdr      RTL-SDR sub-GHz band scan
 #   --enable-hackrf   HackRF One for 2.4 / 5.8 GHz (libhackrf + SoapySDR)
 #   --enable-adsb     dump1090-fa on a dedicated 1090 MHz RTL-SDR
+#
+# Two RTL-SDRs (band scan + ADS-B) are told apart by serial number. Give each
+# dongle its own serial once with rtl_eeprom (see docs/adsb.md), then:
+#   --sdr-serial KESTREL      band-scan RTL-SDR
+#   --adsb-serial ADSB1090    1090 MHz RTL-SDR used by dump1090-fa
 #
 # MQTT username is always "rid" — set by the KESTREL Server at deploy time.
 # ============================================================
@@ -43,6 +50,7 @@ UNATTENDED=false
 OPT_NODE_ID=""; OPT_SERVER_IP=""; OPT_MQTT_PASS=""
 OPT_WIFI_IFACE="wlan1"; OPT_WIFI_IFACE_5G=""; OPT_SDR=false; OPT_ADSB=false; OPT_HACKRF=false
 OPT_REPO=""; OPT_GPS_MODE="usb"; OPT_MQTT_FALLBACK=""
+OPT_SDR_SERIAL=""; OPT_ADSB_SERIAL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +64,8 @@ while [[ $# -gt 0 ]]; do
     --enable-sdr)      OPT_SDR=true;;
     --enable-adsb)     OPT_ADSB=true;;
     --enable-hackrf)   OPT_HACKRF=true;;
+    --sdr-serial)      OPT_SDR_SERIAL="$2";    shift;;
+    --adsb-serial)     OPT_ADSB_SERIAL="$2";   shift;;
     --repo)            OPT_REPO="$2";          shift;;
     --gps-mode)        OPT_GPS_MODE="$2";      shift;;
     *) warn "Unknown argument: $1";;
@@ -129,6 +139,19 @@ if [[ "$UNATTENDED" == false ]]; then
   read -rp "  HackRF fitted (2.4 / 5.8 GHz)? [y/N]: " HACKRF_RESP
   [[ "${HACKRF_RESP,,}" == "y" ]] && ENABLE_HACKRF=true || ENABLE_HACKRF=false
 
+  read -rp "  ADS-B (second RTL-SDR on 1090 MHz, dump1090-fa)? [y/N]: " ADSB_RESP
+  [[ "${ADSB_RESP,,}" == "y" ]] && ENABLE_ADSB=true || ENABLE_ADSB=false
+
+  SDR_SERIAL=""; ADSB_SERIAL=""
+  if [[ "$ENABLE_SDR" == true && "$ENABLE_ADSB" == true ]]; then
+    echo ""
+    echo "  Two RTL-SDRs are told apart by serial (set once with rtl_eeprom, docs/adsb.md)."
+    echo "  Leave blank if you haven't set them yet; you can add them to the config later."
+    read -rp "    Band-scan RTL-SDR serial [KESTREL]: " SDR_SERIAL
+    read -rp "    ADS-B RTL-SDR serial [ADSB1090]: " ADSB_SERIAL
+    SDR_SERIAL="${SDR_SERIAL:-KESTREL}"; ADSB_SERIAL="${ADSB_SERIAL:-ADSB1090}"
+  fi
+
   read -rp "  GPS mode — usb (NEO-M9N) or uart (legacy NEO-M8N) [usb]: " GPS_MODE_RESP
   GPS_MODE="${GPS_MODE_RESP:-usb}"
 else
@@ -141,14 +164,21 @@ else
   WIFI_IFACE_5G="$OPT_WIFI_IFACE_5G"
   ENABLE_SDR="$OPT_SDR"
   ENABLE_HACKRF="$OPT_HACKRF"
+  ENABLE_ADSB="$OPT_ADSB"
+  SDR_SERIAL="$OPT_SDR_SERIAL"
+  ADSB_SERIAL="$OPT_ADSB_SERIAL"
   GPS_MODE="$OPT_GPS_MODE"
   [[ -n "$SERVER_IP" ]] || fail "--server-ip is required in unattended mode"
   [[ -n "$MQTT_PASS"  ]] || fail "--mqtt-password is required in unattended mode"
 fi
 
+# Flags win over the interactive prompts
+[[ "$OPT_SDR"  == true ]] && ENABLE_SDR=true
+[[ "$OPT_ADSB" == true ]] && ENABLE_ADSB=true
+[[ -n "$OPT_SDR_SERIAL"  ]] && SDR_SERIAL="$OPT_SDR_SERIAL"
+[[ -n "$OPT_ADSB_SERIAL" ]] && ADSB_SERIAL="$OPT_ADSB_SERIAL"
 SDR_STR="false";   [[ "$ENABLE_SDR"    == true ]] && SDR_STR="true"
-ENABLE_ADSB="${OPT_ADSB:-false}"
-ADSB_STR="false";  [[ "$ENABLE_ADSB"   == true ]] && ADSB_STR="true"
+ADSB_STR="false";  [[ "${ENABLE_ADSB:-false}" == true ]] && ADSB_STR="true"
 # --enable-hackrf wins over the interactive prompt
 [[ "$OPT_HACKRF" == true ]] && ENABLE_HACKRF=true
 HACKRF_STR="false"; [[ "${ENABLE_HACKRF:-false}" == true ]] && HACKRF_STR="true"
@@ -160,9 +190,9 @@ info "Node ID    : ${BOLD}${NODE_ID}${NC}"
 info "Server     : ${BOLD}${SERVER_IP}${NC}"
 info "Wi-Fi 2.4G : ${WIFI_IFACE}"
 info "Wi-Fi 5G   : ${WIFI_IFACE_5G:-(not fitted)}"
-info "SDR        : ${SDR_STR}"
+info "SDR        : ${SDR_STR}${SDR_SERIAL:+ (serial ${SDR_SERIAL})}"
 info "HackRF     : ${HACKRF_STR}"
-info "ADS-B      : ${ADSB_STR}"
+info "ADS-B      : ${ADSB_STR}${ADSB_SERIAL:+ (serial ${ADSB_SERIAL})}"
 info "GPS mode   : ${GPS_MODE}"
 echo ""
 
@@ -175,7 +205,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   aircrack-ng iw wireless-tools rfkill \
   bluez bluez-tools \
   rtl-sdr librtlsdr-dev \
-  usbutils tcpdump mosquitto-clients
+  usbutils tcpdump mosquitto-clients jq
 ok "Packages installed"
 
 # dump1090-fa for ADS-B (crewed-aircraft awareness) — only when enabled. It
@@ -191,8 +221,6 @@ if [[ "$ADSB_STR" == "true" ]] && ! command -v dump1090-fa >/dev/null 2>&1; then
     apt-get update -qq || true
     if DEBIAN_FRONTEND=noninteractive apt-get install -y dump1090-fa >/dev/null 2>&1; then
       ok "dump1090-fa installed"
-      warn "Running 2+ RTL-SDRs: set unique dongle serials and point dump1090 at the"
-      warn "1090 one — see docs/adsb.md — or it may grab the sub-GHz dongle."
     else
       warn "dump1090-fa install failed — install it manually (docs/adsb.md)"
     fi
@@ -200,6 +228,18 @@ if [[ "$ADSB_STR" == "true" ]] && ! command -v dump1090-fa >/dev/null 2>&1; then
     warn "Could not add the FlightAware repo — install dump1090-fa manually (docs/adsb.md)"
   fi
   rm -rf "$_tmp"
+fi
+
+# Point dump1090-fa at its own dongle. Without this it opens the first RTL-SDR
+# it finds, which may be the band-scan one.
+if [[ "$ADSB_STR" == "true" && -n "$ADSB_SERIAL" && -f /etc/default/dump1090-fa ]]; then
+  if grep -q '^RECEIVER_SERIAL=' /etc/default/dump1090-fa; then
+    sed -i "s|^RECEIVER_SERIAL=.*|RECEIVER_SERIAL=${ADSB_SERIAL}|" /etc/default/dump1090-fa
+  else
+    echo "RECEIVER_SERIAL=${ADSB_SERIAL}" >> /etc/default/dump1090-fa
+  fi
+  systemctl restart dump1090-fa 2>/dev/null || true
+  ok "dump1090-fa pinned to RTL-SDR serial ${ADSB_SERIAL}"
 fi
 
 # HackRF One for the 2.4 / 5.8 GHz bands — only when enabled. The node drives it
@@ -252,6 +292,29 @@ ok "u-blox GPS udev rule set (/dev/ttyGPS symlink for NEO-M9N)"
 
 udevadm control --reload-rules
 udevadm trigger
+
+# Check the RTL-SDR serials against what this deploy expects. Listing works
+# even while dump1090 or the node agent has a dongle open.
+RTL_LIST="$(timeout 6 rtl_test -t 2>&1 | grep -E '^ +[0-9]+: ' || true)"
+RTL_COUNT="$(printf '%s' "$RTL_LIST" | grep -c 'SN:' || true)"
+if [[ "$RTL_COUNT" -gt 0 ]]; then
+  info "RTL-SDRs found:"; printf '%s\n' "$RTL_LIST" | sed 's/^/      /'
+  DUP="$(printf '%s\n' "$RTL_LIST" | sed -n 's/.*SN: *//p' | sort | uniq -d)"
+  if [[ "$RTL_COUNT" -ge 2 && -n "$DUP" ]]; then
+    warn "Two or more RTL-SDRs share serial '${DUP}'. They can't be told apart until"
+    warn "each has its own: stop kestrel-node and dump1090-fa, then per dongle"
+    warn "  rtl_eeprom -d <index> -s <SERIAL>   and unplug/replug.  See docs/adsb.md"
+  fi
+  for _want in "$SDR_SERIAL" "$ADSB_SERIAL"; do
+    if [[ -n "$_want" ]] && ! printf '%s' "$RTL_LIST" | grep -q "SN: ${_want}\$"; then
+      warn "No RTL-SDR with serial '${_want}' connected (yet): set it with rtl_eeprom, then replug"
+    fi
+  done
+  if printf '%s' "$RTL_LIST" | grep -q "Blog V4" && grep -q "VERSION_CODENAME=bookworm" /etc/os-release; then
+    warn "RTL-SDR Blog V4 on Bookworm: its rtl-sdr 0.6.0 can't drive the V4's tuner."
+    warn "Use Raspberry Pi OS Trixie (rtl-sdr 2.0.2) for the V4."
+  fi
+fi
 
 # UART-specific setup — only needed for legacy UART GPS (mode=uart)
 if [[ "$GPS_MODE" == "uart" ]]; then
@@ -327,6 +390,17 @@ else
 fi
 step 5 "Writing node configuration"
 mkdir -p "$CONFIG_DIR" "$LOG_DIR"
+if [[ -f "$CONFIG_DIR/config.yaml" ]]; then
+  CONFIG_BAK="$CONFIG_DIR/config.yaml.bak-$(date +%Y%m%d-%H%M%S)"
+  cp -p "$CONFIG_DIR/config.yaml" "$CONFIG_BAK"
+  info "Existing config backed up to $CONFIG_BAK"
+fi
+if [[ -n "$SDR_SERIAL" ]]; then
+  SDR_SELECT="serial: ${SDR_SERIAL}        # selected by serial; stable across reboots"
+else
+  SDR_SELECT="device_index: 0
+    # serial: KESTREL       # use a serial once a second RTL-SDR (ADS-B) is attached; see docs/adsb.md"
+fi
 
 cat > "$CONFIG_DIR/config.yaml" << YAML
 # KESTREL Node Configuration
@@ -370,8 +444,7 @@ bt:
 sdrs:
   - enabled: ${SDR_STR}
     backend: rtlsdr
-    device_index: 0
-    # serial: KESTREL       # set this once a second RTL-SDR (ADS-B) is attached; see docs/adsb.md
+    ${SDR_SELECT}
     bands: ["900", "1g2", "433"]
   - enabled: ${HACKRF_STR}
     backend: hackrf
@@ -379,7 +452,7 @@ sdrs:
     bands: ["2g4", "5g8"]
 
 # ADS-B — crewed aircraft via dump1090-fa on a dedicated 1090 MHz RTL-SDR.
-# See docs/adsb.md for the dongle serial setup when running multiple RTL-SDRs.
+# dump1090-fa picks its dongle via RECEIVER_SERIAL in /etc/default/dump1090-fa.
 adsb:
   enabled: ${ADSB_STR}
   source_url: "http://127.0.0.1:8080/data/aircraft.json"
@@ -409,12 +482,14 @@ fi
 # managing eth0.  Unmanaging wlan1/wlan2 replaces 'airmon-ng check kill',
 # which stopped NetworkManager entirely and could drop the node's wired IP.
 if [[ -d /etc/NetworkManager/conf.d ]]; then
-  cat > /etc/NetworkManager/conf.d/99-kestrel-monitor.conf << 'NMCONF'
+  NM_IFACES="interface-name:${WIFI_IFACE}"
+  [[ -n "$WIFI_IFACE_5G" ]] && NM_IFACES="${NM_IFACES};interface-name:${WIFI_IFACE_5G}"
+  cat > /etc/NetworkManager/conf.d/99-kestrel-monitor.conf << NMCONF
 [keyfile]
-unmanaged-devices=interface-name:wlan1;interface-name:wlan2
+unmanaged-devices=${NM_IFACES}
 NMCONF
   systemctl reload NetworkManager 2>/dev/null || true
-  ok "NetworkManager will ignore wlan1/wlan2"
+  ok "NetworkManager will ignore ${WIFI_IFACE}${WIFI_IFACE_5G:+ and ${WIFI_IFACE_5G}}"
 fi
 
 # Post-install GPS device check
@@ -467,6 +542,9 @@ echo -e "  ${GREEN}Wi-Fi 2.4G :${NC} ${WIFI_IFACE}"
 if [[ -n "$WIFI_IFACE_5G" ]]; then
   echo -e "  ${GREEN}Wi-Fi 5G   :${NC} ${WIFI_IFACE_5G}"
 fi
+[[ "$SDR_STR"  == "true" ]] && echo -e "  ${GREEN}SDR        :${NC} RTL-SDR ${SDR_SERIAL:-(device 0)}"
+[[ "$ADSB_STR" == "true" ]] && echo -e "  ${GREEN}ADS-B      :${NC} dump1090-fa ${ADSB_SERIAL:+on serial ${ADSB_SERIAL}}"
+[[ -n "${CONFIG_BAK:-}" ]] && echo -e "  ${GREEN}Old config :${NC} ${CONFIG_BAK}"
 echo -e "  ${GREEN}Service    :${NC} kestrel-node  (auto-starts on boot)"
 echo -e "  ${GREEN}Config     :${NC} ${CONFIG_DIR}/config.yaml"
 echo -e "  ${GREEN}Logs       :${NC} journalctl -fu kestrel-node"
@@ -478,11 +556,12 @@ fi
 echo "  Post-deployment verification:"
 echo "    sudo systemctl status kestrel-node"
 echo "    sudo journalctl -fu kestrel-node"
+echo "    (dashboard → System: each radio's live status)"
 echo ""
 
 if [[ "$UNATTENDED" == false ]]; then
   echo ""
-  echo -e "  ${YELLOW}Tip: The Pi 4 runs warm under load. A heatsink is strongly${NC}"
+  echo -e "  ${YELLOW}Tip: The Pi runs warm under load. An active cooler is strongly${NC}"
   echo -e "  ${YELLOW}recommended if the node will be deployed in an enclosure.${NC}"
   read -rp "  Reboot now? [Y/n]: " RB
   [[ "${RB,,}" == "n" ]] || reboot

@@ -10,7 +10,6 @@ import socket
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
-from typing import Optional
 
 import yaml
 

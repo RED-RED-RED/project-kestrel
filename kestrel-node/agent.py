@@ -14,14 +14,12 @@ Hardware expected:
 Author: KESTREL project
 """
 
-import asyncio
 import logging
 import os
 import signal
 import sys
 import threading
 import time
-from pathlib import Path
 
 from config.settings import load_config, NodeConfig, resolve_sdrs
 from banner import banner

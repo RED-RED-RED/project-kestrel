@@ -17,12 +17,10 @@ Open source reference: https://github.com/opendroneid/opendroneid-core-c
 """
 
 import logging
-import math
 import struct
 import time
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Optional
 
 log = logging.getLogger(__name__)
 

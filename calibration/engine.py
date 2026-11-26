@@ -31,10 +31,7 @@ Per-node CalibrationResult with:
 """
 
 import logging
-import math
-import statistics
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 

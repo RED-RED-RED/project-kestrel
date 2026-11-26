@@ -4,7 +4,7 @@ api/routes/detections.py
 REST endpoints for detection history and drone tracks.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException
 from db.database import get_pool

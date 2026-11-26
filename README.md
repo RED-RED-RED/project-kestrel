@@ -1,6 +1,6 @@
 # KESTREL AIRSPACE
 
-> Open-source airspace awareness platform. Distributed KESTREL nodes (KN-xx) passively detect FAA Remote ID broadcasts over Wi-Fi NAN and Bluetooth 5 LR, feeding a central server that correlates detections across nodes, identifies drone make and model from FAA Declaration of Compliance records, scores threats, and verifies positions via MLAT trilateration.
+> Open-source airspace awareness platform. Distributed KESTREL nodes (KN-xx) passively detect FAA Remote ID broadcasts over Wi-Fi NAN and Bluetooth 5 LR, spot drone control links with an SDR, and hear crewed aircraft over ADS-B, feeding a central server that correlates detections across nodes, identifies drone make and model from FAA Declaration of Compliance records, scores threats, and verifies positions via MLAT trilateration.
 >
 > _Formerly AEGIS (platform) and ARGUS (nodes). The full rename to KESTREL — directories, services, MQTT topics, env vars, and node callsigns (KN-xx) — is complete; see `docs/kestrel-migration.md` for the fleet cutover steps._
 
@@ -67,11 +67,12 @@ cd project-kestrel
 #    Debian 12+, or Pi OS 64-bit — a VM or bare metal both work)
 sudo bash scripts/deploy-kestrel-server.sh
 
-# 3. Deploy each KESTREL-NODE (run on each Pi)
-sudo bash scripts/deploy-kestrel-node.sh
+# 3. Deploy each KESTREL-NODE (on each Pi; it clones the repo itself)
+wget https://raw.githubusercontent.com/RED-RED-RED/project-kestrel/main/scripts/deploy-kestrel-node.sh
+sudo bash deploy-kestrel-node.sh
 
 # 4. Verify
-python scripts/healthcheck.py --server <SERVER_IP>
+python3 scripts/healthcheck.py --server <SERVER_IP>
 ```
 
 Open `http://<server-ip>` — KESTREL will appear.
@@ -96,9 +97,10 @@ KESTREL-NODE                    KESTREL Server                  KESTREL
 ──────────                    ────────────                  ────────────
 WiFi NAN scan  ─── MQTT ───►  subscriber.py                useStore.js
 BT5 LR scan    ─── MQTT ───►    │── INSERT detections       │── /ws WebSocket
-GPS fix        ─── MQTT ───►    │── UPSERT drone_tracks     │── /api/analysis
+SDR band scan  ─── MQTT ───►    │── UPSERT drone_tracks     │── /api/analysis
+ADS-B          ─── MQTT ───►    │── aircraft_store          │
 heartbeat      ─── MQTT ───►    │── alert_engine.evaluate   │
-                                │── pipeline.process        MapView.jsx
+ (+ radio status)               │── pipeline.process        MapView.jsx
                                 │     ├── trilateration     ThreatPanel.jsx
                                 │     └── threat_scoring    RightPanel.jsx
                                 └── ws_broadcaster.broadcast
@@ -109,19 +111,14 @@ heartbeat      ─── MQTT ───►    │── alert_engine.evaluate   
 | Topic | Direction | Content |
 |---|---|---|
 | `kestrel/<id>/detection` | node → server | Full RID frame, RSSI, node GPS |
-| `kestrel/<id>/heartbeat` | node → server | CPU, memory, GPS fix, active radios list, jamming/spoofing state, survey status (10s) |
+| `kestrel/<id>/heartbeat` | node → server | CPU, memory, temperature, GPS fix (every 10 s), plus `radio_status` once a minute or on any change |
 | `kestrel/<id>/status` | node → server | `online`/`offline` (LWT, retained) |
 | `kestrel/<id>/rf_detection` | node → server | SDR-classified RF control/video link — OcuSync, ELRS, FPV video, etc. (optional) |
+| `kestrel/<id>/aircraft` | node → server | ADS-B aircraft heard this interval (optional, [docs/adsb.md](docs/adsb.md)) |
 
-**Heartbeat extra fields (NEO-M9N only):**
+Leave the node's `mqtt.topic_prefix` at `kestrel`: the server subscribes to `kestrel/#`.
 
-| Field | Values | Description |
-|---|---|---|
-| `jamming_state` | `ok` / `warning` / `critical` | Hardware GPS jamming indicator from UBX-NAV-STATUS |
-| `spoofing_state` | `ok` / `spoofing` / `multiple` | Hardware GPS spoofing indicator from UBX-NAV-STATUS |
-| `survey_complete` | `true` / `false` | Whether the node has completed survey-in |
-| `detected_port` | e.g. `/dev/ttyACM0` | Serial port the GPS daemon auto-detected |
-| `gps_mode` | `usb` / `uart` | Active GPS mode |
+**Per-radio status (`radio_status`).** One entry per radio (GPS, Wi-Fi 2.4 / 5 GHz, Bluetooth, each SDR, ADS-B), each with a state of `running`, `degraded` (working but missing something, e.g. no GPS fix or Bluetooth Long Range off), `down` (with the reason) or `off` (disabled in config), plus a few live rates such as frames, adverts or messages per minute. The GPS entry carries the u-blox's jamming and spoofing state and whether the survey-in is done. The dashboard shows it per band; a radio that stays down raises a `radio_down` alert.
 
 ---
 
@@ -137,20 +134,23 @@ Reference build for the current field node. Prices are rough street figures and 
 | Active cooler | GeeekPi Armor Lite V5 | Thermal | $12 |
 | Boot storage | microSD (A2) or NVMe + HAT | OS + local cache | $15–40 |
 | UPS | Geekworm X1202 (5 V out, 6–18 V in) | Ride-through power + clean shutdown | $55 |
-| Wi-Fi adapter | Alfa AWUS036ACM | Wi-Fi NAN monitor mode (mt76x2u) | $60 |
+| Wi-Fi adapters ×2 | Alfa AWUS036ACM | Wi-Fi NAN monitor mode (mt76x2u), one each for 2.4 and 5 GHz | $60 each |
 | Bluetooth dongle | Nordic nRF52840 Dongle (PCA10059) | BT4 + BT5 Long Range (Coded PHY) | $11 |
 | GPS module | u-blox NEO-M9N (USB) | Geolocation + jamming/spoofing detection | $77 |
 | Active GPS antenna | SMA active patch/puck (external) | GPS reception — quality matters a lot (see note) | ~$30 |
-| SDR | RTL-SDR Blog V4 (HackRF for 2.4/5.8 GHz) | RF link detection | $40 (HackRF $300+) |
+| SDR | RTL-SDR Blog V4 (HackRF for 2.4/5.8 GHz) | RF link detection, 433 / 915 MHz / 1.2 GHz | $40 (HackRF $300+) |
+| ADS-B receiver (optional) | Second RTL-SDR, e.g. Nooelec NESDR SMArt v5, + 1090 MHz antenna | Crewed-aircraft awareness ([docs/adsb.md](docs/adsb.md)) | ~$50 |
 | Wi-Fi antennas | Dual-band 6 dBi N-male omni ×2 (e.g. MikroTik Groove spares) | External Wi-Fi | $0 on hand (~$26 new) |
 | Enclosure | Weatherproof outdoor hotspot kit (RAK/MNTD style) | IP-rated housing | $60 |
 | RF cabling & adapters | RG316 SMA/N pigtails, bulkhead panel mounts, SMA/RP-SMA adapter kit | Panel-mount RF interconnect | ~$42 |
 | USB cabling | USB-A 3.0, USB-C 3.1 Gen2, USB-A extension (1 ft) | Peripheral interconnect | ~$24 |
 | Panel hardware | Waterproof momentary power button, IP68 breather vent, status LED | Enclosure I/O | ~$25 |
 
-Roughly **$550–600** per node with the RTL-SDR. Swapping in a HackRF (for 2.4/5.8 GHz coverage) adds ~$300+. Several items (GPS module, Wi-Fi antennas, storage) you may already have on hand.
+Roughly **$550–600** per node with one Wi-Fi adapter and the RTL-SDR; the second adapter and ADS-B receiver add about $110. A HackRF (for 2.4/5.8 GHz coverage) adds ~$300+. Several items (GPS module, Wi-Fi antennas, storage) you may already have on hand.
 
-**Enclosure fit** — space is tight. Fitting a HackRF alongside the Alfa, GPS and nRF52840 likely means shorter USB cables and adding a compact **powered USB hub** (~$15–25) to supply the Alfa + HackRF current draw without browning out the Pi. Budget room (and amps) for it.
+**OS:** Raspberry Pi OS Lite 64-bit, **Trixie** recommended. The RTL-SDR Blog V4 needs Trixie's rtl-sdr 2.0.2; Bookworm's 0.6.0 can't drive its tuner.
+
+**Enclosure fit and power** — space is tight. Two Alfas, two RTL-SDRs (or an RTL-SDR and a HackRF), the GPS and the nRF52840 can draw more than the Pi's USB ports supply, so plan on a compact **powered USB hub** (~$15–25) and shorter cables. A radio that randomly drops off USB is usually a power problem.
 
 **Test equipment (not part of a node)** — a cooperative Remote ID broadcaster such as the **Ruko R111S** (~$40) is useful for validating detection end-to-end: fly or bench it and confirm the node picks it up on the map.
 
@@ -168,7 +168,7 @@ Any 64-bit Linux machine with Docker. The stack (TimescaleDB + Mosquitto + FastA
 
 **u-blox NEO-M8N (UART, legacy)** — connect to Pi UART (`/dev/ttyAMA0`). Pass `--gps-mode uart` to the deploy script; it enables the UART in `/boot/firmware/config.txt` and disables the serial console. **A reboot is required** after this setup. The NEO-M8N does not support UBX survey-in or hardware jamming/spoofing detection.
 
-**SDR frequency coverage** — the RTL-SDR Blog V4 reaches ~1.766 GHz, so on an RTL-SDR the scanner covers **433 / 900 MHz and 1.2 GHz** only; 2.4 and 5.8 GHz are above the tuner and are skipped automatically. A **HackRF** (1 MHz – 6 GHz) is supported for full coverage, including 2.4 GHz OcuSync/ELRS and 5.8 GHz FPV video — set `sdr_backend: hackrf` in the node config and install SoapySDR. The classifier is **receive-only**; the HackRF's transmit path is never used (jamming is illegal for non-federal operators). Classifier thresholds are first-order and meant to be field-calibrated against a known transmitter (e.g. a RadioMaster ELRS radio).
+**SDR frequency coverage** — the RTL-SDR Blog V4 reaches ~1.766 GHz, so on an RTL-SDR the scanner covers **433 / 900 MHz and 1.2 GHz** only; 2.4 and 5.8 GHz are above the tuner and are skipped automatically. A **HackRF** (1 MHz – 6 GHz) is supported for full coverage, including 2.4 GHz OcuSync/ELRS and 5.8 GHz FPV video — deploy the node with `--enable-hackrf` (installs libhackrf and SoapySDR and enables its `sdrs:` entry). The RTL-SDR and HackRF run side by side, each sweeping its own bands. The classifier is **receive-only**; the HackRF's transmit path is never used (jamming is illegal for non-federal operators). Classifier thresholds are first-order and meant to be field-calibrated against a known transmitter (e.g. a RadioMaster ELRS radio).
 
 ---
 
@@ -181,12 +181,13 @@ Any 64-bit Linux machine with Docker. The stack (TimescaleDB + Mosquitto + FastA
 sudo bash scripts/deploy-kestrel-server.sh
 
 # Non-interactive (Ansible, cloud-init, CI)
-KESTREL_DB_PASSWORD=yourdbpass \
-KESTREL_MQTT_PASSWORD=yourmqttpass \
-sudo bash scripts/deploy-kestrel-server.sh --yes
+sudo bash scripts/deploy-kestrel-server.sh --unattended \
+  --db-password yourdbpass --mqtt-password yourmqttpass --carto-key yourkey
 ```
 
-The script: installs Docker, builds KESTREL, generates credentials, configures Mosquitto auth, starts all containers via Docker Compose, and installs an `kestrel-server.service` systemd unit for auto-start on boot.
+The script installs Docker, generates credentials, configures Mosquitto auth, builds the dashboard and starts all containers via Docker Compose (`restart: unless-stopped`, so they come back after a reboot). Passwords are written to `kestrel-server/docker/.env` and to `DEPLOYMENT.md` in the repo root (both gitignored).
+
+**Re-running is safe.** On an existing server it keeps `.env` as it is (database and MQTT passwords, API key, notification settings) and saves a timestamped backup beside it. The database password can't change after the first deploy (Postgres only takes it when the data volume is created); `--mqtt-password` changes the MQTT password, after which every node's config needs the new one.
 
 > **OS support.** Tested on Ubuntu 24.04 and 26.04 LTS, Debian 12+, and Raspberry Pi OS (64-bit). Docker is installed via the official `get.docker.com` convenience script, which tracks new releases — including fresh LTS codenames. On a brand-new release the Docker apt repo can lag by a few days; if the script reports no candidate for your codename, either retry after a day or install the engine against the previous LTS codename:
 > ```bash
@@ -202,9 +203,9 @@ The script: installs Docker, builds KESTREL, generates credentials, configures M
 | Service | Port | Description |
 |---|---|---|
 | Nginx | 80 | KESTREL UI + API reverse proxy |
-| KESTREL Server (FastAPI) | 8000 | Internal, proxied by Nginx |
+| KESTREL Server (FastAPI) | 8000 | Proxied by Nginx; also reachable directly (calibration tool, health check) |
 | Mosquitto | 1883 | MQTT broker (authenticated) |
-| TimescaleDB | 5432 | Internal only |
+| TimescaleDB | 5432 | Server's localhost only |
 
 Credentials are written to `kestrel-server/docker/.env` — back this file up.
 
@@ -223,9 +224,9 @@ The four containers that start together:
 | Container | Port | Description |
 |---|---|---|
 | `nginx` | 80 | Serves KESTREL UI and proxies `/api` and `/ws` |
-| `kestrel-server` | 8000 (internal) | FastAPI — starts after timescaledb and mosquitto are healthy |
+| `kestrel-server` | 8000 | FastAPI — starts after timescaledb and mosquitto are healthy |
 | `mosquitto` | 1883 | MQTT broker (authenticated) |
-| `timescaledb` | 5432 (internal) | Time-series database |
+| `timescaledb` | 5432 (localhost) | Time-series database |
 
 ### API authentication
 
@@ -254,66 +255,40 @@ VITE_API_KEY=your-secret-key-here
 
 ### KESTREL-NODE deployment
 
-Flash Pi OS Lite 64-bit to SD card, enable SSH, then:
+Flash Raspberry Pi OS Lite 64-bit (Trixie) to the SD card or NVMe, enable SSH, then on the Pi:
 
 ```bash
-# Copy project to node
-scp -r kestrel-platform/ pi@KN-01.local:~/
-ssh pi@KN-01.local
+wget https://raw.githubusercontent.com/RED-RED-RED/project-kestrel/main/scripts/deploy-kestrel-node.sh
+sudo bash deploy-kestrel-node.sh            # interactive: prompts for everything
+```
 
-# Interactive install — prompts for all values
-sudo bash kestrel-platform/scripts/deploy-kestrel-node.sh
+Download it and run it as above; piping it into `bash` breaks the prompts. The script clones the repo to `/opt/kestrel-node`, writes `/etc/kestrel-node/config.yaml`, installs the `kestrel-node` service and offers to reboot.
 
-# Non-interactive install (USB GPS, default)
-sudo bash kestrel-platform/scripts/deploy-kestrel-node.sh \
-  --unattended \
-  --node-id KN-01 \
-  --server-ip 192.168.1.100 \
-  --mqtt-password yourmqttpass
+Unattended, with both Wi-Fi bands, the RTL-SDR band scan and ADS-B:
 
-# With a Tailscale fallback — node uses the LAN IP on-site, the Tailscale
-# name when remote (see "Remote access — Tailscale" below)
-sudo bash kestrel-platform/scripts/deploy-kestrel-node.sh \
-  --unattended \
-  --node-id KN-01 \
-  --server-ip 192.168.1.100 \
+```bash
+sudo bash deploy-kestrel-node.sh --unattended \
+  --node-id KN-01 --server-ip 192.168.1.100 --mqtt-password yourmqttpass \
   --mqtt-fallback kestrel-server \
-  --mqtt-password yourmqttpass
+  --wifi-iface-5g wlan2 \
+  --enable-sdr --sdr-serial KESTREL \
+  --enable-adsb --adsb-serial ADSB1090
+```
 
-# Non-interactive install (legacy UART GPS — requires reboot)
-sudo bash kestrel-platform/scripts/deploy-kestrel-node.sh \
-  --unattended \
-  --node-id KN-01 \
-  --server-ip 192.168.1.100 \
-  --mqtt-password yourmqttpass \
-  --gps-mode uart
-sudo reboot   # only required for uart mode
+All flags are in [kestrel-node/README.md](kestrel-node/README.md#install). A few things to know:
 
-# After (re)boot
+- **Two RTL-SDRs** (band scan + ADS-B) need their own serial numbers, set once per dongle with `rtl_eeprom`. See [docs/adsb.md](docs/adsb.md#multiple-rtl-sdrs-pin-them-by-serial); the deploy warns if they still share one.
+- **Re-running** backs up the existing config and regenerates it from the flags, so pass the same flags again.
+- **Legacy UART GPS** (NEO-M8N): add `--gps-mode uart` and reboot afterwards.
+
+Then check it:
+
+```bash
 sudo systemctl status kestrel-node
 sudo journalctl -fu kestrel-node
 ```
 
-Or run interactively — the script prompts for all values, including GPS mode, and explains each option.
-
-**GPS mode flag:**
-
-| Flag | Default | Description |
-|---|---|---|
-| `--gps-mode usb` | yes | u-blox NEO-M9N via USB (`/dev/ttyACM0` → `/dev/ttyGPS`) |
-| `--gps-mode uart` | no | Legacy NEO-M8N via UART (`/dev/ttyAMA0`); enables UART in boot config, reboot required |
-
-**Deploying multiple nodes:**
-
-```bash
-# Node 1 (USB GPS)
-sudo bash scripts/deploy-kestrel-node.sh \
-  --unattended --node-id KN-01 --server-ip 192.168.1.100 --mqtt-password pass
-
-# Node 2
-sudo bash scripts/deploy-kestrel-node.sh \
-  --unattended --node-id KN-02 --server-ip 192.168.1.100 --mqtt-password pass
-```
+and the dashboard's **System** view, which shows every radio's live state. The node's scanners start up to 60 s after boot, once the GPS has a fix (or the wait times out).
 
 ### Remote access — Tailscale (recommended)
 
@@ -353,15 +328,16 @@ sudo bash scripts/setup-wireguard.sh server
 sudo bash scripts/setup-wireguard.sh node <SERVER_PUBLIC_IP> <NODE_INDEX>
 ```
 
-Or pass `KESTREL_USE_VPN=1` to `deploy-kestrel-node.sh` and it handles VPN setup automatically. VPN addressing: KESTREL server = `10.100.0.1`, nodes = `10.100.0.2`, `.3`, `.4`… With WireGuard, set `host_fallback` to the server's VPN address (`10.100.0.1`) for the same LAN-first / VPN-fallback behaviour.
+VPN addressing: KESTREL server = `10.100.0.1`, nodes = `10.100.0.2`, `.3`, `.4`… With WireGuard, set `host_fallback` to the server's VPN address (`10.100.0.1`) for the same LAN-first / VPN-fallback behaviour.
 
 ### Health check
 
 ```bash
-python scripts/healthcheck.py --server 192.168.1.100
+python3 scripts/healthcheck.py --server 192.168.1.100
+python3 scripts/healthcheck.py --server 192.168.1.100 --api-key yourkey   # if KESTREL_API_KEY is set
 ```
 
-Verifies TCP connectivity to all services, checks the REST API, reports node online/offline status, and flags any open HIGH alerts.
+Checks MQTT, the API, the dashboard and the database (directly when run on the server, through `/health` from anywhere else), lists each node's status with any radio that's down or degraded, and flags open HIGH alerts. Exits non-zero if a core service is unreachable.
 
 ### Updating
 
@@ -383,7 +359,7 @@ sudo bash scripts/update.sh node     # Pull latest, update venv deps, re-patch p
 # or: make update-node
 ```
 
-This does `git fetch` + `git reset --hard origin/main`, reinstalls `kestrel-node/requirements.txt` into the venv, re-applies the Python 3.13 pyrtlsdr patch, and restarts `kestrel-node.service`.
+This does `git fetch` + `git reset --hard origin/main`, refreshes the systemd unit if it changed, reinstalls `kestrel-node/requirements.txt` into the venv, re-applies the Python 3.13 pyrtlsdr patch, and restarts `kestrel-node.service`. `/etc/kestrel-node/config.yaml` isn't touched, and system packages (dump1090-fa, HackRF) aren't installed: run the deploy script with the matching flag for those.
 
 **Version check** (any host):
 
@@ -472,11 +448,11 @@ KESTREL connects to the KESTREL Server via WebSocket (`/ws`) and receives a full
 | **Threats** | Full-width panel with animated 0–100 score gauges, 8-factor breakdown bars, MLAT position detail, spoof confidence meter, and an "RF / No RID" strip. Live drones show solid; stale ones (>2 min) are dimmed. |
 | **Packet Feed** | Detection stream pre-seeded with the last 150 detections on load, then live via WebSocket. Includes SDR-classified RF links with RID / no-RID tags. |
 | **Flights** | Historical sorties — detections grouped into flights (new flight after a >5 min gap). Filterable flight list; the selected flight shows its path, operator location, detecting nodes, altitude/speed profile, a time-scrub replay, and GPX/KML/CSV export. No-RID / RF-only contacts are listed separately. |
-| **System** | Live status cards for every node and the server (CPU/mem/disk, temp, uptime, GPS sats, DB/MQTT) plus historical charts (1h–7d range, ~7-day retention) with warning bands. |
+| **System** | Live status cards for every node and the server (CPU/mem/disk, temp, uptime, GPS sats, DB/MQTT), each node with its **Radios** table: every radio's state, live rates and the reason if something's wrong. Historical charts (1h–7d range, ~7-day retention) with warning bands. The **Settings** tab holds the live-editable alert thresholds, including node offline / radio down timing and the low-aircraft advisory. |
 
 ### Sidebar
 
-- **KESTREL nodes** — lists each node with status dot, CPU %, GPS fix, and active radio badges (WiFi / BT5 / SDR). Badges reflect the actual scanners running on the node.
+- **KESTREL nodes** — each node with status dot, CPU %, GPS fix, and one chip per radio (2.4, 5, BT, LR, SDR, ADS-B, GPS): green running, amber degraded, red down; hover for the reason. Nodes on older code show the coarse WiFi / BT5 / SDR chips.
 - **Node Health** — CPU/MEM/DISK mini-bars and temperature (imperial or metric) for the selected node.
 - **Server Health** — CPU/MEM/DISK bars and DB/MQTT status dots for the KESTREL Server, polled every 10 seconds from `/health`.
 
@@ -523,7 +499,7 @@ GET  /api/detections/stats              Aggregate counts
 ### Nodes
 
 ```
-GET  /api/nodes                         All KESTREL nodes with health
+GET  /api/nodes                         All KESTREL nodes with health and per-radio status
 GET  /api/nodes/{id}                    Node detail
 GET  /api/nodes/{id}/detections         Recent detections from one node
 ```
@@ -553,10 +529,23 @@ GET  /api/rf/contacts                   SDR-classified RF links (filter: active_
 GET  /api/rf/stats                      RF contact counts
 ```
 
-### System health
+### System, settings, registry, notifications
 
 ```
+GET  /health                            Server CPU/mem/disk, DB and MQTT status (no auth)
 GET  /api/system/health/history         Per-node + server cpu/mem/disk/temp series (range: 1h|6h|24h|7d)
+GET  /api/system/rid-identity           Make/model reference table status
+POST /api/system/rid-identity/rebuild   Rebuild it from the FAA DoC API
+POST /api/system/rid-identity/import    Import a prefix CSV
+GET  /api/settings                      Live-editable settings + read-only values
+PUT  /api/settings                      Change settings (applied immediately)
+GET  /api/registry                      Every drone seen, with category and notes
+GET  /api/registry/categories           Category ladder
+GET  /api/registry/{id}                 One drone
+PUT  /api/registry/{id}                 Set category
+POST /api/registry/{id}/notes           Add a note
+GET  /api/notify/status                 Push notification config
+POST /api/notify/test                   Send a test push
 ```
 
 ### Flights
@@ -574,13 +563,16 @@ GET  /api/flights/rf-contacts           No-RID / RF-only contacts over a range
 |---|---|---|
 | `no_rid` | HIGH | Drone airborne above threshold altitude with no operator ID |
 | `speed` | MEDIUM | Horizontal speed exceeds configured threshold (default 30 m/s) |
-| `altitude` | MEDIUM | Above 400ft AGL without operator ID |
+| `altitude` | MEDIUM | Above 400 ft AGL without operator ID (AGL from the drone's own height, or estimated from the node's ground elevation) |
 | `spoofed_position` | HIGH | Drone reporting position at (0, 0) while airborne |
 | `operator_spoof` | MEDIUM | Broadcast operator position is farther than `alert_operator_max_km` (default 5 km) from the drone, or null (0, 0) — a tampered/spoofed operator field. The map draws the pilot tether in red. |
 | `new_drone` | LOW | First detection of a drone ID in the database |
 | `threat_score` | HIGH | Threat score crosses into ≥ 70 band |
 | `position_mismatch` | HIGH | MLAT estimate diverges > 250m from broadcast with spoof confidence > 60% |
 | `gps_jamming` | MEDIUM | KESTREL node reports GPS jamming (`warning` or `critical`) from UBX-NAV-STATUS |
+| `low_aircraft` | MEDIUM | Crewed aircraft below the configured AGL (default 400 ft) within range of a node (ADS-B; thresholds in Settings) |
+| `node_offline` | MEDIUM | Node disconnected from the broker, or no heartbeat for `node_offline_after_s` (default 5 min). Can be switched off in Settings |
+| `radio_down` | MEDIUM | One radio on an online node reported down for `radio_down_after_s` (default 2 min). Can be switched off in Settings |
 | `rf_no_rid` | HIGH / MEDIUM | SDR-classified drone link (2.4 / 5.8 GHz) with no correlating Remote ID broadcast. 900/433 MHz links need corroboration (a second node) before they alert |
 
 ### WebSocket
@@ -589,7 +581,7 @@ GET  /api/flights/rf-contacts           No-RID / RF-only contacts over a range
 
 | Message type | Trigger | Content |
 |---|---|---|
-| `live_state` | Every 500ms | Full snapshot: drones, nodes, alerts, RF contacts, detection rate |
+| `live_state` | Every 500ms | Full snapshot: drones, nodes (with radio status), alerts, RF contacts, ADS-B aircraft, detection rate |
 | `detection` | Per detection | Single detection for packet feed |
 | `rf_detection` | Per RF link | SDR-classified RF contact for the packet feed / map |
 | `alert` | Per alert | New alert object |
@@ -638,42 +630,59 @@ The calibration utility fits `n` and `RSSI_REF` independently per node from a ca
 
 ## Troubleshooting
 
-### SDR scanner exits immediately (`SDR libraries not available`)
+### A radio shows down or degraded
 
-`pyrtlsdr` depends on `pkg_resources` which is not included in the default Python 3.13 venv. Fix:
+The System view gives the reason. The node log has the detail:
 
 ```bash
-sudo /opt/kestrel-node/venv/bin/pip install 'setuptools==69.5.1' --force-reinstall --no-binary :all:
+journalctl -u kestrel-node -n 100 --no-pager | grep -iE "warn|error|not found|Scanner starting|RTL-SDR open"
+```
+
+| Reason | Fix |
+|---|---|
+| `interface wlan2 not found` | Adapter not detected: check `lsusb` / `iw dev`, and USB power (powered hub) |
+| `no frames received in the last minute` | Adapter open but deaf: check `iw dev` shows `type monitor`, and `iw reg get` shows your country (not `00`) |
+| `No RTL-SDR with serial '...'. Connected serials: ...` | Set the serial with `rtl_eeprom`, then unplug and replug. See [docs/adsb.md](docs/adsb.md#multiple-rtl-sdrs-pin-them-by-serial) |
+| `Long Range (Coded PHY) unsupported by dongle firmware` | Flash the nRF52840 with [the KESTREL firmware](kestrel-node/firmware/nrf52840-hci-usb/README.md) |
+| GPS `no fix` | Needs sky view. Normal indoors |
+| ADS-B `dump1090 unreachable` | dump1090-fa not running, or it can't find its dongle: `journalctl -u dump1090-fa` |
+
+More ADS-B and RTL-SDR cases (claim errors, 404s, line of sight, the Blog V4 on Bookworm) are in [docs/adsb.md](docs/adsb.md#troubleshooting).
+
+### SDR scanner exits immediately (`SDR libraries not available`)
+
+`pyrtlsdr` imports `pkg_resources`, which Python 3.13 venvs don't include. The deploy and `update.sh node` patch this automatically; to re-apply by hand:
+
+```bash
+sudo bash /opt/kestrel-node/scripts/patch-pyrtlsdr.sh /opt/kestrel-node/venv
 sudo systemctl restart kestrel-node
 ```
 
-### `setup_interfaces.sh: Permission denied` after git pull
+### `kestrel-node` fails to start: `setup_interfaces.sh: Permission denied`
 
-`git reset --hard` strips the execute bit from `setup_interfaces.sh`. Fix:
+The startup hook lost its execute bit (older checkouts tracked it without one, and `git reset --hard` applied that). Current code tracks it as executable and `update.sh node` re-applies it. To fix by hand:
 
 ```bash
 sudo chmod +x /opt/kestrel-node/kestrel-node/systemd/setup_interfaces.sh
 sudo systemctl restart kestrel-node
 ```
 
-To prevent recurrence, the execute bit is tracked in git (`git update-index --chmod=+x`). If it reappears, re-run the `git update-index` command on the dev machine and push.
+### RTL-SDR can't reach 2.4 / 5.8 GHz
 
-### SDR segfaults / `[R82XX] PLL not locked`
-
-The R820T tuner cannot tune above ~1,766 MHz. If you have modified `SWEEP_FREQS` in `sdr.py` to include 2.4 GHz frequencies, the device will segfault. Keep all frequencies below `R820T_MAX_HZ = 1_766_000_000`.
+The RTL-SDR's tuner stops around 1.766 GHz, so bands `2g4` and `5g8` in an `rtlsdr` entry are skipped. Those bands need a HackRF (`--enable-hackrf`).
 
 ---
 
 ## Development
 
 ```bash
-# Run all 311 tests
+# Run all tests (each suite runs from its own folder, as CI does)
 make test
 
 # Individual suites
-make test-node     # 200 tests — RID parser, GPS, Wi-Fi NAN, Bluetooth HCI, SDR classifier (scapy required for Wi-Fi NAN)
-make test-server   # 80 tests  — alert engine, trilateration, threat scoring, RF pipeline, system + flights
-make test-cal      # 31 tests  — calibration engine, collector, config writer
+make test-node     # RID parser, GPS, Wi-Fi NAN, Bluetooth HCI, SDR, ADS-B, radio health (scapy required)
+make test-server   # alerts, trilateration, threat scoring, RF pipeline, flights, settings, radio status
+make test-cal      # calibration engine, collector, config writer
 
 # Start server
 make server-up && make server-logs
@@ -688,19 +697,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and workflow.
 
 ## Test Suite
 
-| Module | Tests |
-|---|---|
-| KESTREL-NODE — OpenDroneID parser + RID wire formats | 30 |
-| KESTREL-NODE — GPS subsystem (auto-detect, UBX, survey-in, jamming) | 66 |
-| KESTREL-NODE — Wi-Fi NAN dual-adapter scanner (requires scapy) | 31 |
-| KESTREL-NODE — Bluetooth HCI (BT4/5 Long Range) | 43 |
-| KESTREL-NODE — SDR classifier + scanner | 30 |
-| KESTREL Server — alert engine (rules + GPS jamming alerts) | 19 |
-| KESTREL Server — trilateration + threat scoring | 30 |
-| KESTREL Server — RF pipeline (classify → correlate → score → alert) | 22 |
-| KESTREL Server — system health + flight history | 9 |
-| Calibration — engine, collector, config writer | 31 |
-| **Total** | **311** |
+| Suite | Covers | Tests |
+|---|---|---|
+| KESTREL-NODE | Remote ID parser + wire formats, GPS (UBX, survey-in, jamming, altitude), Wi-Fi NAN, Bluetooth HCI, SDR classifier + scanner, ADS-B, settings, MQTT fallback, radio health | 243 |
+| KESTREL Server | Alert engine, AGL, low-aircraft advisory, trilateration + threat scoring, RF pipeline, flights, registry, Remote ID identity, settings, node watchdog, radio status, notifier | 180 |
+| Calibration | Engine, collector, config writer | 31 |
+| **Total** | | **454** |
+
+CI runs all three suites plus the dashboard build on every push.
 
 ---
 

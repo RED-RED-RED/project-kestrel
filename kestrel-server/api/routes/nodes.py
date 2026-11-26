@@ -21,10 +21,17 @@ async def list_nodes():
         rows = await conn.fetch("""
             SELECT node_id, site_name, status, last_seen,
                    lat, lon, alt, gps_fix, satellites,
-                   cpu_pct, mem_pct, disk_pct, temp_c, uptime_s
+                   cpu_pct, mem_pct, disk_pct, temp_c, uptime_s,
+                   radios, radio_status, radio_status_at
             FROM nodes ORDER BY node_id
         """)
-    return [dict(r) for r in rows]
+    return [_decode(dict(r)) for r in rows]
+
+
+def _decode(d: dict) -> dict:
+    if isinstance(d.get("radio_status"), str):      # JSONB arrives as text
+        d["radio_status"] = json.loads(d["radio_status"])
+    return d
 
 
 @router.get("/{node_id}")
@@ -34,10 +41,7 @@ async def get_node(node_id: str):
         row = await conn.fetchrow("SELECT * FROM nodes WHERE node_id = $1", node_id)
     if not row:
         raise HTTPException(status_code=404, detail="Node not found")
-    d = dict(row)
-    if isinstance(d.get("radio_status"), str):      # JSONB arrives as text
-        d["radio_status"] = json.loads(d["radio_status"])
-    return d
+    return _decode(dict(row))
 
 
 @router.get("/{node_id}/detections")

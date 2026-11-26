@@ -33,14 +33,13 @@ Requires:
 """
 
 import logging
-import struct
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
 
-from scapy.all import sniff, RadioTap, Dot11, Dot11Elt, Raw
+from scapy.all import sniff, RadioTap, Dot11, Dot11Elt
 
 from parser.opendroneid import OpenDroneIDParser, RIDFrame
 from publisher.mqtt_client import MQTTPublisher

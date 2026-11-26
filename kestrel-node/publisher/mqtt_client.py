@@ -17,7 +17,6 @@ import logging
 import queue
 import threading
 import time
-from dataclasses import asdict
 from typing import Optional
 
 import paho.mqtt.client as mqtt
@@ -39,6 +38,8 @@ class MQTTPublisher:
     def __init__(self, cfg: NodeConfig):
         self.cfg = cfg
         self.node_id = cfg.node_id
+        # Topic prefix from config (mqtt.topic_prefix); must match the server's
+        self._prefix = (getattr(cfg, "mqtt_topic_prefix", None) or "kestrel").strip("/")
         self._q: queue.Queue = queue.Queue(maxsize=cfg.max_queue_size)
         self._connected = threading.Event()
         self._stop = threading.Event()
@@ -68,7 +69,7 @@ class MQTTPublisher:
             self._client.tls_set()
 
         # Last Will Testament: if we drop unexpectedly, broker publishes this
-        lwt_topic = f"kestrel/{self.node_id}/status"
+        lwt_topic = f"{self._prefix}/{self.node_id}/status"
         lwt_payload = json.dumps({"node_id": self.node_id, "status": "offline", "ts": time.time()})
         self._client.will_set(lwt_topic, lwt_payload, qos=1, retain=True)
 
@@ -181,7 +182,7 @@ class MQTTPublisher:
             },
             "ts": frame.timestamp,
         }
-        topic = f"kestrel/{node_id}/detection"
+        topic = f"{self._prefix}/{node_id}/detection"
         self._enqueue(topic, payload, qos=1)
 
     def send_heartbeat(self, gps, radios: list[str] | None = None,
@@ -212,7 +213,7 @@ class MQTTPublisher:
             # Live per-radio health (scanner/health.py). `radios` stays for
             # servers that predate this field.
             payload["radio_status"] = radio_status
-        topic = f"kestrel/{self.node_id}/heartbeat"
+        topic = f"{self._prefix}/{self.node_id}/heartbeat"
         self._enqueue(topic, payload, qos=0)
 
     def publish_rf_detection(self, signal: dict, gps, contact_key=None):
@@ -230,7 +231,7 @@ class MQTTPublisher:
         }
         if contact_key:
             payload["contact_key"] = contact_key
-        topic = f"kestrel/{self.node_id}/rf_detection"
+        topic = f"{self._prefix}/{self.node_id}/rf_detection"
         self._enqueue(topic, payload, qos=0)
 
     def publish_aircraft(self, aircraft: list, gps):
@@ -248,7 +249,7 @@ class MQTTPublisher:
             "count": len(aircraft),
             "ts": time.time(),
         }
-        topic = f"kestrel/{self.node_id}/aircraft"
+        topic = f"{self._prefix}/{self.node_id}/aircraft"
         self._enqueue(topic, payload, qos=0)
 
     # ------------------------------------------------------------------ #
@@ -292,7 +293,7 @@ class MQTTPublisher:
                 log.error(f"Publish exception: {e}")
 
     def _publish_status(self, status: str):
-        topic = f"kestrel/{self.node_id}/status"
+        topic = f"{self._prefix}/{self.node_id}/status"
         payload = json.dumps({"node_id": self.node_id, "status": status, "ts": time.time()})
         try:
             self._client.publish(topic, payload, qos=1, retain=True)
