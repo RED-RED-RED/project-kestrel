@@ -13,7 +13,7 @@ KESTREL falls back to BT4-only scanning with it. This build fixes that.
 | `kestrel-hci-usb-ext.hex` | Ready-to-flash image (loads at 0x1000, above the dongle's bootloader) |
 | `kestrel-rid.conf` | Kconfig overlay applied on top of the stock `hci_usb` sample |
 
-SHA-256 of the hex: `74c363cc8adb01f62cdaa79ded5b4466c4a0bdea733b8bd048f5d3a4343b9298`
+SHA-256 of the hex (LF line endings, as checked out): `b70b8b94932ba85e6a1ac9e03fdbd05694ab48c7719acb08551827b499064b6a`
 
 ## Flash it (Windows, nrfutil with nrf5sdk-tools)
 
